@@ -368,11 +368,11 @@ def update_note_with_changes(note_title, successful_urls, failed_urls, file_type
         
         # Find the section in HTML
         if failed_section_marker not in note_content:
-            # Add the section at the end
-            note_content = f"{note_content}<div><br></div><div><h2>{failed_section_marker}</h2></div><div><br></div>"
+            # Add the section at the end (no empty lines)
+            note_content = f"{note_content}<div><h2>{failed_section_marker}</h2></div>"
         
-        # Add failed URLs to FAILED section
-        failed_urls_html = '<div><br></div>'.join([f'<div>{url}</div>' for url in failed_urls])
+        # Add failed URLs to FAILED section (no empty lines between URLs)
+        failed_urls_html = ''.join([f'<div>{url}</div>' for url in failed_urls])
         
         # Insert failed URLs after the marker
         marker_pos = note_content.find(failed_section_marker)
@@ -380,9 +380,9 @@ def update_note_with_changes(note_title, successful_urls, failed_urls, file_type
             # Find the end of the marker div
             marker_end = note_content.find('</div>', marker_pos + len(failed_section_marker))
             if marker_end != -1:
-                # Insert failed URLs after the marker
+                # Insert failed URLs directly after the marker (no empty lines)
                 note_content = (note_content[:marker_end + 6] + 
-                              f'<div><br></div>{failed_urls_html}<div><br></div>' + 
+                              failed_urls_html + 
                               note_content[marker_end + 6:])
     
     # Add cleanup timestamp log at the end (only if there were changes)
@@ -393,8 +393,8 @@ def update_note_with_changes(note_title, successful_urls, failed_urls, file_type
         
         # Check if cleanup log section exists
         if cleanup_log_marker not in note_content:
-            # Add the section at the end
-            note_content = f"{note_content}<div><br></div><div><h2>{cleanup_log_marker}</h2></div><div><br></div>"
+            # Add the section at the end (no empty lines)
+            note_content = f"{note_content}<div><h2>{cleanup_log_marker}</h2></div>"
         
         # Add this cleanup timestamp
         cleanup_entry = f"Cleanup: {cleanup_timestamp} (Removed {len(successful_urls)} successful, Moved {len(failed_urls)} failed)"
@@ -406,13 +406,15 @@ def update_note_with_changes(note_title, successful_urls, failed_urls, file_type
             # Find the end of the marker div
             log_marker_end = note_content.find('</div>', log_marker_pos + len(cleanup_log_marker))
             if log_marker_end != -1:
-                # Insert cleanup log entry after the marker
+                # Insert cleanup log entry directly after the marker (no empty lines)
                 note_content = (note_content[:log_marker_end + 6] + 
-                              f'<div><br></div>{cleanup_entry_html}<div><br></div>' + 
+                              cleanup_entry_html + 
                               note_content[log_marker_end + 6:])
     
-    # Clean up excessive empty divs
-    note_content = re.sub(r'(<div><br></div>){3,}', '<div><br></div><div><br></div>', note_content)
+    # Clean up empty divs that might have been created
+    note_content = re.sub(r'<div>\s*</div>', '', note_content)
+    # Reduce multiple consecutive empty divs (but keep single ones for spacing)
+    note_content = re.sub(r'(<div><br></div>){3,}', '<div><br></div>', note_content)
     
     # Update the note
     print(f"\n💾 Updating iCloud Note...")
