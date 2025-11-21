@@ -1,0 +1,40 @@
+{
+  "profiles": {
+    "ballet_strict": {
+      "defaults": {
+        "duration_min": 300,
+        "duration_max": 600,
+        "min_views": 50000
+      },
+      "queries": [
+        "professional ballet performance",
+        "classical ballet"
+      ],
+      "filters": {
+        "excluded_keywords": ["tutorial", "compilation", "behind the scenes"]
+      }
+    },
+    "kids_music_relaxed": {
+      "defaults": {
+        "duration_min": 120,
+        "duration_max": 480,
+        "min_views": 5000
+      },
+      "queries": [
+        "kids music concert",
+        "children orchestra performance"
+      ]
+    },
+    "cultural_dance": {
+      "defaults": {
+        "duration_min": 180,
+        "duration_max": 900,
+        "min_views": 10000
+      },
+      "queries": [
+        "traditional dance performance",
+        "cultural dance festival"
+      ]
+    }
+  }
+}

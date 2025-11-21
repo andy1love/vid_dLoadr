@@ -1,0 +1,313 @@
+#!/usr/bin/env python3
+"""
+Trigger Script - Sync Notes to URLs then Download Videos
+Automates the workflow: iCloud Notes → urls.txt → download videos
+"""
+
+import subprocess
+import sys
+import os
+import glob
+
+def run_sync_notes():
+    """Run sync_notes_to_urls.py to sync URLs from Notes to urls.txt"""
+    print("=" * 60)
+    print("   STEP 1: SYNC URLs FROM iCLOUD NOTES")
+    print("=" * 60)
+    print()
+    
+    script_path = os.path.join(os.path.dirname(__file__), 'sync_notes_to_urls.py')
+    
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path],
+            check=False,
+            capture_output=True,  # Capture to parse output
+            text=True
+        )
+        
+        # Print the output
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        
+        # Extract the output filename from the output
+        output_file = None
+        for line in result.stdout.split('\n'):
+            if line.startswith('OUTPUT_FILE:'):
+                output_file = line.split('OUTPUT_FILE:', 1)[1].strip()
+                break
+        
+        if result.returncode == 0:
+            print("\n✅ Sync completed successfully!")
+            return output_file if output_file else True
+        else:
+            print(f"\n⚠️  Sync completed with exit code {result.returncode}")
+            # Continue anyway - might have skipped duplicates which is fine
+            return output_file if output_file else True
+            
+    except FileNotFoundError:
+        print(f"❌ Error: Could not find sync_notes_to_urls.py at {script_path}")
+        return False
+    except Exception as e:
+        print(f"❌ Error running sync script: {e}")
+        return False
+
+def find_latest_timestamped_file(urls_dir):
+    """Find the most recent timestamped URLs file"""
+    pattern = os.path.join(urls_dir, '*_*_urls.txt')
+    files = glob.glob(pattern)
+    
+    if not files:
+        return None
+    
+    # Sort by modification time, most recent first
+    files.sort(key=os.path.getmtime, reverse=True)
+    return files[0]
+
+def run_clean_up(log_file, download_dir, note_title="Download_URLs", dry_run=False):
+    """Run clean_up.py to verify downloads and update iCloud Notes"""
+    print("\n" + "=" * 60)
+    print("   STEP 3: CLEAN UP & UPDATE NOTES")
+    print("=" * 60)
+    print()
+    
+    script_path = os.path.join(os.path.dirname(__file__), 'clean_up.py')
+    
+    # Build command
+    cmd = [sys.executable, script_path, log_file]
+    
+    if download_dir:
+        cmd.extend(['--download-dir', download_dir])
+    
+    if note_title:
+        cmd.extend(['--note', note_title])
+    
+    if dry_run:
+        cmd.append('--dry-run')
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=False,
+            text=True
+        )
+        
+        return result.returncode == 0
+        
+    except FileNotFoundError:
+        print(f"❌ Error: Could not find clean_up.py at {script_path}")
+        return False
+    except Exception as e:
+        print(f"❌ Error running clean up script: {e}")
+        return False
+
+def run_download_videos(urls_file=None, use_cookies=None, cookies_browser=None, output_dir=None):
+    """Run download_video.py to download videos from urls.txt
+    Returns: (success: bool, log_file: str or None)"""
+    print("\n" + "=" * 60)
+    print("   STEP 2: DOWNLOAD VIDEOS")
+    print("=" * 60)
+    print()
+    
+    script_path = os.path.join(os.path.dirname(__file__), 'download_video.py')
+    
+    # Build command
+    cmd = [sys.executable, script_path]
+    
+    if urls_file:
+        # If urls_file is True (from sync), use default logic
+        if isinstance(urls_file, bool):
+            urls_file = None
+        else:
+            cmd.extend(['--file', urls_file])
+    
+    if not urls_file:
+        # Try to find the latest timestamped file in urls/ directory
+        workarea_dir = os.path.join(os.path.dirname(__file__), '_workarea')
+        urls_dir = os.path.join(workarea_dir, 'urls')
+        latest_file = find_latest_timestamped_file(urls_dir)
+        
+        if latest_file:
+            print(f"📄 Using latest timestamped file: {os.path.basename(latest_file)}")
+            cmd.extend(['--file', latest_file])
+            urls_file = latest_file  # Store for log file generation
+        else:
+            # Fallback to default
+            default_file = os.path.join(urls_dir, 'urls.txt')
+            print(f"📄 Using default file: {os.path.basename(default_file)}")
+            cmd.extend(['--file', default_file])
+            urls_file = default_file
+    
+    if output_dir:
+        cmd.extend(['--output', output_dir])
+    
+    if use_cookies and cookies_browser:
+        cmd.extend(['--cookies', cookies_browser])
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=False,
+            text=True
+        )
+        
+        # Generate expected log file path
+        log_file = None
+        if urls_file:
+            # Log file is created by download_video.py with pattern: <urls_file_base>_log.csv
+            # in _workarea/logs/ directory
+            base_name = os.path.splitext(os.path.basename(urls_file))[0]
+            workarea_dir = os.path.join(os.path.dirname(__file__), '_workarea')
+            logs_dir = os.path.join(workarea_dir, 'logs')
+            log_file = os.path.join(logs_dir, f"{base_name}_log.csv")
+        
+        return result.returncode == 0, log_file
+        
+    except FileNotFoundError:
+        print(f"❌ Error: Could not find download_video.py at {script_path}")
+        return False, None
+    except Exception as e:
+        print(f"❌ Error running download script: {e}")
+        return False, None
+
+def main():
+    """Main trigger function"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Trigger script: Sync Notes → Download Videos",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python trigger_download.py                    # Full workflow (default settings)
+  python trigger_download.py --skip-sync        # Skip sync, just download
+  python trigger_download.py --cookies chrome   # Use Chrome cookies for downloads
+  python trigger_download.py --file custom.txt  # Use custom URLs file
+        """
+    )
+    
+    parser.add_argument(
+        '--skip-sync',
+        action='store_true',
+        help='Skip syncing from Notes, just download from existing urls.txt'
+    )
+    
+    parser.add_argument(
+        '--file',
+        type=str,
+        help='Path to URLs file (default: workarea/urls.txt)'
+    )
+    
+    parser.add_argument(
+        '--output',
+        type=str,
+        help='Output directory for downloads (default: from download_video.py)'
+    )
+    
+    parser.add_argument(
+        '--cookies',
+        type=str,
+        choices=['chrome', 'firefox', 'safari', 'edge'],
+        help='Browser to extract cookies from (helps avoid 403 errors)'
+    )
+    
+    parser.add_argument(
+        '--skip-cleanup',
+        action='store_true',
+        help='Skip the clean up step after downloads'
+    )
+    
+    parser.add_argument(
+        '--cleanup-dry-run',
+        action='store_true',
+        help='Run clean up in dry-run mode (preview changes without applying)'
+    )
+    
+    args = parser.parse_args()
+    
+    print("\n" + "=" * 60)
+    print("   TRIGGER: SYNC & DOWNLOAD AUTOMATION")
+    print("=" * 60)
+    print()
+    
+    # Step 1: Sync from Notes (unless skipped)
+    synced_file = None
+    if not args.skip_sync:
+        sync_result = run_sync_notes()
+        if not sync_result:
+            print("\n❌ Sync failed. Aborting.")
+            sys.exit(1)
+        # sync_result could be the filename or True
+        if isinstance(sync_result, str):
+            synced_file = sync_result
+            print(f"\n✅ Synced file: {os.path.basename(synced_file)}")
+    else:
+        print("⏭️  Skipping sync step (--skip-sync flag used)")
+    
+    # Step 2: Download videos
+    # Use synced file if available, otherwise use provided file or find latest
+    download_urls_file = synced_file if synced_file else args.file
+    
+    download_success, log_file = run_download_videos(
+        urls_file=download_urls_file,
+        use_cookies=bool(args.cookies),
+        cookies_browser=args.cookies,
+        output_dir=args.output
+    )
+    
+    # Step 3: Clean up (verify downloads and update Notes)
+    cleanup_success = None
+    if not args.skip_cleanup and download_success and log_file and os.path.exists(log_file):
+        # Get note title from sync result or use default
+        note_title = "Download_URLs"  # Default
+        
+        # Use default download directory if not specified
+        default_download_dir = os.path.join(os.path.expanduser("~"), "Downloads", "Videos")
+        cleanup_success = run_clean_up(
+            log_file=log_file,
+            download_dir=args.output if args.output else default_download_dir,
+            note_title=note_title,
+            dry_run=args.cleanup_dry_run
+        )
+    elif args.skip_cleanup:
+        print("\n⏭️  Skipping clean up step (--skip-cleanup flag used)")
+    elif not log_file or not os.path.exists(log_file):
+        print(f"\n⚠️  Log file not found: {log_file or 'N/A'}")
+        print("   Skipping clean up step")
+    
+    # Final summary
+    print("\n" + "=" * 60)
+    print("   FINAL SUMMARY")
+    print("=" * 60)
+    
+    if args.skip_sync:
+        print("⏭️  Sync: Skipped")
+    else:
+        print("✅ Sync: Completed")
+    
+    if download_success:
+        print("✅ Download: Completed")
+    else:
+        print("❌ Download: Failed or had errors")
+    
+    if cleanup_success is not None:
+        if cleanup_success:
+            print("✅ Clean Up: Completed")
+        else:
+            print("⚠️  Clean Up: Completed with warnings")
+    elif not args.skip_cleanup:
+        print("⏭️  Clean Up: Skipped (log file not found)")
+    
+    if download_success:
+        print("\n🎉 All done!")
+        sys.exit(0)
+    else:
+        print("\n⚠️  Check the output above for details.")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
