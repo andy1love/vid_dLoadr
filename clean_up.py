@@ -161,16 +161,27 @@ def extract_video_id(url):
     except:
         return None
 
-def find_downloaded_video(video_id, download_base_dir):
-    """Find downloaded MP4 file by video ID"""
+def find_downloaded_file(video_id, download_base_dir, file_type='video'):
+    """Find downloaded file (MP3 or MP4) by video ID
+    file_type: 'video' for MP4, 'audio' for MP3"""
     if not video_id:
         return None
     
-    # Search in dated folders (YYYYMMDD format)
+    # Determine file extension and subfolder based on type
+    if file_type == 'audio':
+        ext = 'mp3'
+        subfolder = 'mp3'
+    else:
+        ext = 'mp4'
+        subfolder = 'video'
+    
+    # Search in dated folders (YYYYMMDD format) with subfolder
     today = datetime.now().strftime('%Y%m%d')
     search_patterns = [
-        os.path.join(download_base_dir, today, f'*{video_id}*.mp4'),
-        os.path.join(download_base_dir, '*', f'*{video_id}*.mp4'),  # Any dated folder
+        os.path.join(download_base_dir, today, subfolder, f'*{video_id}*.{ext}'),
+        os.path.join(download_base_dir, today, f'*{video_id}*.{ext}'),  # Fallback: check base folder
+        os.path.join(download_base_dir, '*', subfolder, f'*{video_id}*.{ext}'),  # Any dated folder
+        os.path.join(download_base_dir, '*', f'*{video_id}*.{ext}'),  # Any dated folder, base level
     ]
     
     for pattern in search_patterns:
@@ -180,8 +191,26 @@ def find_downloaded_video(video_id, download_base_dir):
     
     return None
 
-def verify_successful_download(row, download_base_dir):
-    """Verify that MP4 file exists for successful download"""
+def find_downloaded_video(video_id, download_base_dir):
+    """Find downloaded MP4 file by video ID (backward compatibility)"""
+    return find_downloaded_file(video_id, download_base_dir, 'video')
+
+def detect_file_type_from_log_filename(log_file):
+    """Detect if log file is for MP3 or MP4 downloads based on filename"""
+    if not log_file:
+        return 'video'  # Default to video
+    
+    filename = os.path.basename(log_file).lower()
+    if 'mp3' in filename:
+        return 'audio'
+    elif 'mp4' in filename:
+        return 'video'
+    else:
+        return 'video'  # Default to video for backward compatibility
+
+def verify_successful_download(row, download_base_dir, file_type='video'):
+    """Verify that file (MP3 or MP4) exists for successful download
+    file_type: 'video' for MP4, 'audio' for MP3"""
     if '✅ Success' not in row.get('Status', ''):
         return False
     
@@ -192,10 +221,10 @@ def verify_successful_download(row, download_base_dir):
         return False
     
     # Try to find the downloaded file
-    video_file = find_downloaded_video(video_id, download_base_dir)
+    downloaded_file = find_downloaded_file(video_id, download_base_dir, file_type)
     
-    if video_file and os.path.exists(video_file):
-        file_size = os.path.getsize(video_file)
+    if downloaded_file and os.path.exists(downloaded_file):
+        file_size = os.path.getsize(downloaded_file)
         # Check if file is reasonable size (at least 1KB)
         if file_size > 1024:
             return True
@@ -245,8 +274,9 @@ def extract_urls_from_text(text):
     url_pattern = r'https?://[^\s<>"\']+'
     return re.findall(url_pattern, text)
 
-def update_note_with_changes(note_title, successful_urls, failed_urls):
-    """Update the iCloud Note by removing successful URLs and moving failed ones"""
+def update_note_with_changes(note_title, successful_urls, failed_urls, file_type='video'):
+    """Update the iCloud Note by removing successful URLs and moving failed ones
+    file_type: 'video' for MP4 URLs, 'audio' for MP3 URLs"""
     print(f"\n📝 Reading current note content...")
     note_content = get_note_content(note_title)
     
@@ -254,7 +284,6 @@ def update_note_with_changes(note_title, successful_urls, failed_urls):
         print(f"❌ Could not read note '{note_title}'")
         return False
     
-    # Extract all URLs and their positions from the note
     import re
     url_pattern = r'https?://[^\s<>"\']+'
     
@@ -264,14 +293,64 @@ def update_note_with_changes(note_title, successful_urls, failed_urls):
     # Find all URLs in the note
     all_urls_in_note = re.findall(url_pattern, text_content)
     
-    # Remove successful URLs
-    print(f"\n🗑️  Removing {len(successful_urls)} successful URL(s)...")
-    for url in successful_urls:
-        # Remove from HTML content
-        note_content = note_content.replace(url, '')
-        # Also clean up any empty divs that might result
-        note_content = re.sub(r'<div>\s*</div>', '', note_content)
-        note_content = re.sub(r'<div><br></div>\s*<div><br></div>', '<div><br></div>', note_content)
+    # Determine which section marker to use for context
+    marker = "___mp3___" if file_type == 'audio' else "___mp4___"
+    file_type_name = "MP3" if file_type == 'audio' else "MP4"
+    
+    # Remove successful URLs, but be smart about which section they're in
+    print(f"\n🗑️  Removing {len(successful_urls)} successful {file_type_name} URL(s)...")
+    
+    # Split note content by lines to preserve structure
+    lines = note_content.split('\n')
+    new_lines = []
+    current_section = None  # Track which section we're in
+    skip_next_empty = False
+    
+    for line in lines:
+        # Check for section markers (handle both plain text and HTML)
+        line_lower = line.lower()
+        if "___mp3___" in line_lower:
+            current_section = 'mp3'
+            new_lines.append(line)
+            continue
+        elif "___mp4___" in line_lower:
+            current_section = 'mp4'
+            new_lines.append(line)
+            continue
+        
+        # Check if this line contains a URL we need to remove
+        should_remove = False
+        for url in successful_urls:
+            if url in line:
+                # Only remove if it's in the correct section
+                if (file_type == 'audio' and current_section == 'mp3') or \
+                   (file_type == 'video' and (current_section == 'mp4' or current_section is None)):
+                    should_remove = True
+                    break
+        
+        if should_remove:
+            # Remove the URL from the line
+            cleaned_line = line
+            for url in successful_urls:
+                cleaned_line = cleaned_line.replace(url, '')
+            cleaned_line = cleaned_line.strip()
+            
+            # Only keep the line if it has other content
+            if cleaned_line and cleaned_line not in ['<div></div>', '<div><br></div>']:
+                new_lines.append(cleaned_line)
+            # Otherwise skip the line entirely
+            skip_next_empty = True
+        else:
+            # Keep the line as is
+            if not (skip_next_empty and not line.strip()):
+                new_lines.append(line)
+                skip_next_empty = False
+    
+    note_content = '\n'.join(new_lines)
+    
+    # Clean up empty divs
+    note_content = re.sub(r'<div>\s*</div>', '', note_content)
+    note_content = re.sub(r'<div><br></div>\s*<div><br></div>', '<div><br></div>', note_content)
     
     # Handle failed URLs
     if failed_urls:
@@ -472,8 +551,12 @@ Examples:
     verified_count = 0
     not_found_count = 0
     
+    # Detect file type from log filename
+    file_type = detect_file_type_from_log_filename(log_file)
+    file_type_name = "MP3" if file_type == 'audio' else "MP4"
+    
     print("\n" + "=" * 60)
-    print("🔍 VERIFYING DOWNLOADS")
+    print(f"🔍 VERIFYING DOWNLOADS ({file_type_name})")
     print("=" * 60)
     
     for entry in log_entries:
@@ -487,13 +570,13 @@ Examples:
         
         if '✅ Success' in status:
             print(f"\n✅ Checking: {title[:40]}...")
-            if verify_successful_download(entry, download_dir):
+            if verify_successful_download(entry, download_dir, file_type):
                 successful_urls.append(url)
                 verified_count += 1
-                print(f"   ✓ MP4 file found - will remove from note")
+                print(f"   ✓ {file_type_name} file found - will remove from note")
             else:
                 not_found_count += 1
-                print(f"   ⚠️  MP4 file not found - keeping in note")
+                print(f"   ⚠️  {file_type_name} file not found - keeping in note")
         elif '❌ Failed' in status:
             failed_urls.append(url)
             print(f"\n❌ Failed: {title[:40]}...")
@@ -511,14 +594,14 @@ Examples:
     if dry_run:
         print("\n🔍 DRY RUN - Would update note with:")
         if successful_urls:
-            print(f"   Remove {len(successful_urls)} successful URL(s)")
+            print(f"   Remove {len(successful_urls)} successful {file_type_name} URL(s)")
         if failed_urls:
             print(f"   Move {len(failed_urls)} failed URL(s) to FAILED section")
     else:
         if successful_urls or failed_urls:
-            success = update_note_with_changes(note_title, successful_urls, failed_urls)
+            success = update_note_with_changes(note_title, successful_urls, failed_urls, file_type)
             if success:
-                print("\n✅ Note updated successfully!")
+                print(f"\n✅ Note updated successfully! ({file_type_name} URLs cleaned)")
             else:
                 print("\n❌ Failed to update note")
         else:
