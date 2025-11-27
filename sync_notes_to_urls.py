@@ -73,59 +73,76 @@ def get_note_content(note_title):
         print(f"❌ Error accessing Notes: {e}")
         return None
 
-def extract_urls(text_or_html):
-    """Extract URLs from text (handles both plain text and HTML)"""
-    urls = []
+def extract_urls_by_marker(text_or_html):
+    """Extract URLs from text, separated by ___mp3___ and ___mp4___ markers
+    Returns: (mp3_urls: list, mp4_urls: list, all_urls: list)"""
+    mp3_urls = []
+    mp4_urls = []
+    all_urls = []
     
     if not text_or_html:
-        return urls
+        return mp3_urls, mp4_urls, all_urls
     
     # First, strip HTML to get plain text
     text = strip_html(text_or_html)
     
-    # Also extract URLs directly from HTML/raw content (in case they're in attributes)
-    url_pattern = r'https?://[^\s<>"\']+'
-    all_found_urls = re.findall(url_pattern, text_or_html)
+    # Split by markers
+    mp3_marker = "___mp3___"
+    mp4_marker = "___mp4___"
     
-    # Add URLs found in raw content
-    for url in all_found_urls:
-        url = url.rstrip('.,;!?)')
-        try:
-            parsed = urlparse(url)
-            if parsed.netloc and url not in urls:
-                urls.append(url)
-        except:
-            pass
-    
-    # Also check the plain text extracted from HTML
+    # Find marker positions
     lines = text.split('\n')
+    current_section = None  # 'mp3', 'mp4', or None
+    
+    url_pattern = r'https?://[^\s<>"\']+'
+    
     for line in lines:
         line = line.strip()
         if not line:
             continue
-            
-        # Check if entire line is a URL
-        if line.startswith('http://') or line.startswith('https://'):
-            # Validate URL
+        
+        # Check for markers (case-insensitive)
+        if mp3_marker.lower() in line.lower():
+            current_section = 'mp3'
+            continue
+        elif mp4_marker.lower() in line.lower():
+            current_section = 'mp4'
+            continue
+        
+        # Extract URLs from the line
+        found_urls = re.findall(url_pattern, line)
+        if not found_urls:
+            # Check if entire line is a URL
+            if line.startswith('http://') or line.startswith('https://'):
+                found_urls = [line]
+        
+        # Add URLs to appropriate list
+        for url in found_urls:
+            url = url.rstrip('.,;!?)')
             try:
-                parsed = urlparse(line)
-                if parsed.netloc and line not in urls:  # Avoid duplicates
-                    urls.append(line)
+                parsed = urlparse(url)
+                if parsed.netloc:
+                    if current_section == 'mp3' and url not in mp3_urls:
+                        mp3_urls.append(url)
+                        all_urls.append(url)
+                    elif current_section == 'mp4' and url not in mp4_urls:
+                        mp4_urls.append(url)
+                        all_urls.append(url)
+                    elif current_section is None:
+                        # URLs before any marker go to mp4 (default behavior)
+                        if url not in mp4_urls:
+                            mp4_urls.append(url)
+                            all_urls.append(url)
             except:
                 pass
-        else:
-            # Try to find URLs embedded in the line
-            found_urls = re.findall(url_pattern, line)
-            for url in found_urls:
-                url = url.rstrip('.,;!?)')
-                try:
-                    parsed = urlparse(url)
-                    if parsed.netloc and url not in urls:
-                        urls.append(url)
-                except:
-                    pass
     
-    return urls
+    return mp3_urls, mp4_urls, all_urls
+
+def extract_urls(text_or_html):
+    """Extract URLs from text (handles both plain text and HTML)
+    Legacy function for backward compatibility"""
+    _, _, all_urls = extract_urls_by_marker(text_or_html)
+    return all_urls
 
 def read_existing_urls(file_path):
     """Read existing URLs from file to avoid duplicates"""
@@ -173,16 +190,18 @@ def append_urls_to_file(file_path, new_urls, existing_urls):
         print(f"❌ Error writing to file: {e}")
         return 0, [], []
 
-def create_timestamped_file(all_urls, base_dir):
-    """Create a timestamped file with all URLs"""
+def create_timestamped_file(all_urls, base_dir, file_type=''):
+    """Create a timestamped file with URLs
+    file_type: 'mp3', 'mp4', or '' for combined"""
     # Generate timestamp: YYYYMMDD_HHMM
     timestamp = datetime.now().strftime('%Y%m%d_%H%M')
     
     # Count total URLs
     url_count = len(all_urls)
     
-    # Create filename: YYYYMMDD_HHMM_<count>_urls.txt
-    filename = f"{timestamp}_{url_count}_urls.txt"
+    # Create filename: YYYYMMDD_HHMM_<count>_<type>_urls.txt
+    type_suffix = f"_{file_type}" if file_type else ""
+    filename = f"{timestamp}_{url_count}{type_suffix}_urls.txt"
     file_path = os.path.join(base_dir, filename)
     
     # Write all URLs to the file
@@ -228,15 +247,16 @@ def main():
     
     print(f"✅ Found note content ({len(note_content)} characters)")
     
-    # Step 2: Extract URLs
-    print("\n🔗 Extracting URLs...")
-    urls = extract_urls(note_content)
+    # Step 2: Extract URLs by marker (MP3 vs MP4)
+    print("\n🔗 Extracting URLs by marker (___mp3___ / ___mp4___)...")
+    mp3_urls, mp4_urls, all_urls = extract_urls_by_marker(note_content)
     
-    if not urls:
+    if not all_urls:
         print("❌ No URLs found in note")
         return
     
-    print(f"✅ Found {len(urls)} URL(s)")
+    print(f"✅ Found {len(mp3_urls)} MP3 URL(s) and {len(mp4_urls)} MP4 URL(s)")
+    print(f"📊 Total: {len(all_urls)} URL(s)")
     
     # Step 3: Check existing URLs
     print("\n📋 Checking for duplicates...")
@@ -246,19 +266,36 @@ def main():
     # Step 4: Append new URLs to main file
     print(f"\n💾 Appending to {URLS_FILE}...")
     added_count, added_urls, skipped_urls = append_urls_to_file(
-        URLS_FILE, urls, existing_urls
+        URLS_FILE, all_urls, existing_urls
     )
     
-    # Step 5: Create timestamped file with URLs from Note only
-    # The timestamped file should represent what's CURRENTLY in the Note,
-    # not the cumulative history from urls.txt
-    note_urls = set(urls)  # Only URLs currently in the Note
+    # Step 5: Create timestamped files with URLs from Note only
+    # Create separate files for MP3 and MP4 URLs
+    timestamped_files = {}
     
-    # Save timestamped file in urls/ directory
-    timestamped_file, timestamped_filename = create_timestamped_file(note_urls, URLS_DIR)
+    if mp3_urls:
+        mp3_file, mp3_filename = create_timestamped_file(set(mp3_urls), URLS_DIR, 'mp3')
+        if mp3_file:
+            timestamped_files['mp3'] = mp3_file
+            print(f"\n📄 Created MP3 timestamped file: {mp3_filename}")
+            print(f"OUTPUT_FILE_MP3:{mp3_file}")
     
-    if timestamped_file:
-        print(f"\n📄 Created timestamped file: {timestamped_filename}")
+    if mp4_urls:
+        mp4_file, mp4_filename = create_timestamped_file(set(mp4_urls), URLS_DIR, 'mp4')
+        if mp4_file:
+            timestamped_files['mp4'] = mp4_file
+            print(f"\n📄 Created MP4 timestamped file: {mp4_filename}")
+            print(f"OUTPUT_FILE_MP4:{mp4_file}")
+    
+    # For backward compatibility, also create combined file if no markers found
+    if not mp3_urls and not mp4_urls:
+        # Fallback: treat all URLs as MP4 (default behavior)
+        note_urls = set(all_urls)
+        timestamped_file, timestamped_filename = create_timestamped_file(note_urls, URLS_DIR)
+        if timestamped_file:
+            timestamped_files['combined'] = timestamped_file
+            print(f"\n📄 Created timestamped file: {timestamped_filename}")
+            print(f"OUTPUT_FILE:{timestamped_file}")
     
     # Step 6: Summary
     print("\n" + "=" * 50)
@@ -267,13 +304,15 @@ def main():
     print(f"✅ Added: {added_count} new URL(s)")
     if skipped_urls:
         print(f"⏭️  Skipped: {len(skipped_urls)} duplicate(s)")
-    print(f"📊 Total URLs in Note: {len(note_urls)}")
+    print(f"📊 Total URLs in Note: {len(all_urls)}")
+    print(f"   • MP3 URLs: {len(mp3_urls)}")
+    print(f"   • MP4 URLs: {len(mp4_urls)}")
     print(f"📊 Total URLs in history file: {len(existing_urls)}")
     
-    if timestamped_file:
-        print(f"📁 Timestamped file: {timestamped_filename}")
-        # Print filename for trigger script to capture (on a separate line, easy to parse)
-        print(f"\nOUTPUT_FILE:{timestamped_file}")
+    if timestamped_files:
+        print(f"\n📁 Created timestamped files:")
+        for file_type, file_path in timestamped_files.items():
+            print(f"   • {file_type}: {os.path.basename(file_path)}")
     
     if added_urls:
         print("\n📝 Added URLs:")

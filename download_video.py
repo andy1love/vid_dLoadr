@@ -13,6 +13,39 @@ import json
 from datetime import datetime
 import subprocess
 
+def load_config():
+    """Load configuration from config.json
+    Returns: dict with config values, or empty dict if file not found"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'config.json')
+    
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️  Warning: Could not load config.json: {e}")
+            return {}
+    return {}
+
+def get_default_download_dir(download_type='video'):
+    """Get default download directory from config.json based on download type
+    download_type: 'video' for MP4, 'audio' for MP3
+    Returns: base directory path for the download type"""
+    config = load_config()
+    
+    if download_type == 'audio':
+        download_dir = config.get('download_dir_mp3', None)
+    else:
+        download_dir = config.get('download_dir_mp4', None)
+    
+    if download_dir:
+        # Expand user home directory if path starts with ~
+        return os.path.expanduser(download_dir)
+    
+    # Fallback to default
+    return os.path.join(os.path.expanduser("~"), "Downloads", "Videos")
+
 def check_yt_dlp():
     """Check if yt-dlp is installed"""
     try:
@@ -66,15 +99,36 @@ def read_urls_from_file(file_path):
         print(f"❌ Error reading file {file_path}: {e}")
         return []
 
-def create_download_folder(base_path):
-    """Create a dated folder for today's downloads"""
+def create_download_folder(base_path, download_type='video'):
+    """Create a dated folder with package number for today's downloads
+    download_type: 'video' for MP4, 'audio' for MP3
+    Returns: folder path in format YYYYMMDD_## (e.g., 20251125_01)"""
     today = datetime.now().strftime('%Y%m%d')
-    folder_path = os.path.join(base_path, today)
     
-    # Create folder if it doesn't exist
-    os.makedirs(folder_path, exist_ok=True)
-    
-    return folder_path
+    # Find the next available package number for today
+    package_num = 1
+    while True:
+        folder_name = f"{today}_{package_num:02d}"
+        folder_path = os.path.join(base_path, folder_name)
+        
+        # If folder doesn't exist, use this number
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path, exist_ok=True)
+            return folder_path
+        
+        # If folder exists, check if it's empty or being used
+        # For now, we'll increment to avoid conflicts
+        # In the future, could check if folder is empty or has recent activity
+        package_num += 1
+        
+        # Safety limit (unlikely to hit 100 packages in one day)
+        if package_num > 99:
+            # Fallback: use timestamp to make it unique
+            timestamp = datetime.now().strftime('%H%M%S')
+            folder_name = f"{today}_{timestamp}"
+            folder_path = os.path.join(base_path, folder_name)
+            os.makedirs(folder_path, exist_ok=True)
+            return folder_path
 
 def get_video_info(url, use_cookies=False, cookies_browser=None):
     """Get video metadata using yt-dlp JSON output"""
@@ -102,9 +156,71 @@ def get_video_info(url, use_cookies=False, cookies_browser=None):
     except (subprocess.CalledProcessError, json.JSONDecodeError, subprocess.TimeoutExpired):
         return None
 
+def download_audio(url, download_path, use_cookies=False, cookies_browser=None):
+    """Download audio as MP3 using yt-dlp
+    Returns: (success: bool, title: str, video_id: str, duration: int, error: str)"""
+    print(f"\n🎵 Downloading audio (MP3) to: {download_path}")
+    print(f"🔗 URL: {url}\n")
+    
+    # Try to get video info first
+    video_info = get_video_info(url, use_cookies, cookies_browser)
+    title = video_info.get('title', 'Unknown') if video_info else 'Unknown'
+    video_id = video_info.get('id', '') if video_info else ''
+    duration = video_info.get('duration', 0) if video_info else 0
+    
+    # yt-dlp command for audio download (best quality audio, convert to MP3)
+    command = [
+        'yt-dlp',
+        # Format selection - best audio available
+        '-f', 'bestaudio[ext=m4a]/bestaudio/best',
+        # Extract audio and convert to MP3
+        '--extract-audio',
+        '--audio-format', 'mp3',
+        '--audio-quality', '256K',  # High quality: 256kbps
+        # Anti-bot measures
+        '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        '--sleep-requests', '1',
+        '--sleep-interval', '3',
+        '--max-sleep-interval', '6',
+        # Retries
+        '--retries', '10',
+        '--fragment-retries', '10',
+        # Additional options
+        '--no-check-certificate',
+        '--prefer-free-formats',
+        # Output template with ID for unique filenames
+        '-o', os.path.join(download_path, '%(title)s_%(id)s.%(ext)s'),
+    ]
+    
+    # Add cookies if requested
+    if use_cookies and cookies_browser:
+        command.extend(['--cookies-from-browser', cookies_browser])
+        print(f"🍪 Using cookies from {cookies_browser}")
+    
+    # Add URL
+    command.append(url)
+    
+    try:
+        # Run yt-dlp with real-time progress output
+        print("⏳ Processing audio (this may take a few minutes)...")
+        print("   Watch for progress updates below:\n")
+        
+        # Run without capturing output - let yt-dlp print directly
+        result = subprocess.run(command, check=True, timeout=7200)
+        
+        print("\n✅ Audio download complete!")
+        return True, title, video_id, duration, ""
+    except subprocess.TimeoutExpired:
+        print(f"\n⏱️  Download timed out after 2 hours")
+        return False, title, video_id, duration, "Timeout after 2 hours"
+    except subprocess.CalledProcessError as e:
+        error_msg = str(e)[:100]
+        print(f"\n❌ Error downloading audio: {e}")
+        return False, title, video_id, duration, error_msg
+
 def download_video(url, download_path, use_cookies=False, cookies_browser=None):
     """Download video using yt-dlp with enhanced options to avoid 403 errors
-    Returns: (success: bool, title: str, video_id: str, error: str)"""
+    Returns: (success: bool, title: str, video_id: str, duration: int, error: str)"""
     print(f"\n📥 Downloading video to: {download_path}")
     print(f"🔗 URL: {url}\n")
     
@@ -263,15 +379,17 @@ def write_log_csv(log_file, download_logs):
         print(f"⚠️  Warning: Could not write log file: {e}")
         return False
 
-def download_multiple_videos(urls, download_path, use_cookies=False, cookies_browser=None, input_file=None):
-    """Download multiple videos from a list of URLs"""
+def download_multiple_videos(urls, download_path, use_cookies=False, cookies_browser=None, input_file=None, download_type='video'):
+    """Download multiple videos or audio from a list of URLs
+    download_type: 'video' or 'audio'"""
     total_urls = len(urls)
+    download_type_name = "MP3s" if download_type == 'audio' else "videos"
     successful_downloads = 0
     failed_downloads = 0
     failed_urls = []
     download_logs = []
     
-    print(f"\n🚀 Starting batch download of {total_urls} videos...")
+    print(f"\n🚀 Starting batch download of {total_urls} {download_type_name}...")
     print("=" * 60)
     
     start_time = datetime.now()
@@ -298,9 +416,14 @@ def download_multiple_videos(urls, download_path, use_cookies=False, cookies_bro
         
         # Track download time
         download_start = datetime.now()
-        success, title, video_id, duration, error = download_video(
-            url, download_path, use_cookies, cookies_browser
-        )
+        if download_type == 'audio':
+            success, title, video_id, duration, error = download_audio(
+                url, download_path, use_cookies, cookies_browser
+            )
+        else:
+            success, title, video_id, duration, error = download_video(
+                url, download_path, use_cookies, cookies_browser
+            )
         download_end = datetime.now()
         download_time = (download_end - download_start).total_seconds()
         
@@ -374,8 +497,8 @@ Examples:
     parser.add_argument(
         '--output', 
         type=str, 
-        default=os.path.join(os.path.expanduser("~"), "Downloads", "Videos"),
-        help='Base output directory (default: ~/Downloads/Videos)'
+        default=None,  # Will be set to config value or default in main()
+        help='Base output directory (default: from config.json or ~/Downloads/Videos)'
     )
     
     parser.add_argument(
@@ -385,13 +508,37 @@ Examples:
         help='Browser to extract cookies from (helps avoid 403 errors)'
     )
     
+    parser.add_argument(
+        '--type',
+        type=str,
+        choices=['video', 'audio'],
+        default='video',
+        help='Download type: video (MP4) or audio (MP3) (default: video)'
+    )
+    
     return parser.parse_args()
 
-def interactive_mode(download_folder):
+def interactive_mode(base_path, initial_download_type='video'):
     """Interactive mode - prompt user for input"""
     print("\n" + "=" * 50)
     print("   INTERACTIVE MODE")
     print("=" * 50)
+    
+    # Ask about download type
+    print("\nWhat would you like to download?")
+    print("1. Video (MP4)")
+    print("2. Audio (MP3)")
+    type_choice = input("Enter choice (1-2, default: 1): ").strip() or '1'
+    download_type = 'audio' if type_choice == '2' else 'video'
+    download_type_name = "MP3s" if download_type == 'audio' else "Videos"
+    
+    # Get base path for the selected type if not overridden
+    if not base_path or base_path == os.path.join(os.path.expanduser("~"), "Downloads", "Videos"):
+        base_path = get_default_download_dir(download_type)
+    
+    # Create folder with package number
+    download_folder = create_download_folder(base_path, download_type)
+    print(f"\n📁 {download_type_name} will be saved to: {download_folder}")
     
     # Ask about cookies once
     use_cookies = False
@@ -423,7 +570,7 @@ def interactive_mode(download_folder):
         
         if choice == '1':
             # Single URL mode
-            url = input("\nPaste the video URL: ").strip()
+            url = input(f"\nPaste the {download_type_name.lower()} URL: ").strip()
             if not url:
                 print("❌ No URL provided.")
                 continue
@@ -432,11 +579,15 @@ def interactive_mode(download_folder):
                 print("❌ Invalid URL. Must start with http:// or https://")
                 continue
             
-            success, title, video_id, duration, error = download_video(url, download_folder, use_cookies, cookies_browser)
-            if success:
-                print(f"\n📂 Video saved in folder: {download_folder}")
+            if download_type == 'audio':
+                success, title, video_id, duration, error = download_audio(url, download_folder, use_cookies, cookies_browser)
             else:
-                print("\n❌ Download failed. Please check the URL and try again.")
+                success, title, video_id, duration, error = download_video(url, download_folder, use_cookies, cookies_browser)
+            
+            if success:
+                print(f"\n📂 {download_type_name[:-1]} saved in folder: {download_folder}")
+            else:
+                print(f"\n❌ Download failed. Please check the URL and try again.")
         
         elif choice == '2':
             # File mode
@@ -450,11 +601,24 @@ def interactive_mode(download_folder):
                 print("❌ No valid URLs found in file.")
                 continue
             
+            # Detect download type from filename if it contains 'mp3' or 'mp4'
+            if 'mp3' in os.path.basename(file_path).lower():
+                download_type = 'audio'
+                download_type_name = "MP3s"
+            elif 'mp4' in os.path.basename(file_path).lower():
+                download_type = 'video'
+                download_type_name = "Videos"
+            
+            # Get base path for detected type
+            file_base_path = get_default_download_dir(download_type)
+            file_download_folder = create_download_folder(file_base_path, download_type)
+            print(f"\n📁 Files will be saved to: {file_download_folder}")
+            
             # Confirm before downloading
-            print(f"\nFound {len(urls)} URLs. Proceed with download? (y/n): ", end="")
+            print(f"\nFound {len(urls)} URLs. Proceed with {download_type_name.lower()} download? (y/n): ", end="")
             confirm = input().strip().lower()
             if confirm in ['y', 'yes']:
-                download_multiple_videos(urls, download_folder, use_cookies, cookies_browser, input_file=file_path)
+                download_multiple_videos(urls, file_download_folder, use_cookies, cookies_browser, input_file=file_path, download_type=download_type)
             else:
                 print("Download cancelled.")
         
@@ -469,9 +633,6 @@ def main():
     # Parse command line arguments
     args = parse_arguments()
     
-    # Base download path
-    base_path = args.output
-    
     print("=" * 50)
     print("   VIDEO DOWNLOADER (403 Error Fixed)")
     print("   Supports: YouTube & Instagram")
@@ -485,8 +646,17 @@ def main():
     print("\n💡 TIP: If you're getting 403 errors, update yt-dlp:")
     print("   pip install --upgrade yt-dlp")
     
-    # Create today's folder
-    download_folder = create_download_folder(base_path)
+    # Determine download type
+    download_type = args.type
+    
+    # Get base download path - use --output if provided, otherwise use config or default
+    if args.output:
+        base_path = args.output
+    else:
+        base_path = get_default_download_dir(download_type)
+    
+    # Create today's folder with package number
+    download_folder = create_download_folder(base_path, download_type)
     print(f"\n📁 Downloads will be saved to: {download_folder}")
     
     # Determine mode based on arguments
@@ -498,16 +668,37 @@ def main():
             print("❌ Invalid URL. Must start with http:// or https://")
             sys.exit(1)
         
-        success, title, video_id, duration, error = download_video(args.url, download_folder, 
-                                use_cookies=bool(args.cookies), 
-                                cookies_browser=args.cookies)
-        if success:
-            print(f"\n📂 Video saved in folder: {download_folder}")
+        if download_type == 'audio':
+            success, title, video_id, duration, error = download_audio(args.url, download_folder, 
+                                    use_cookies=bool(args.cookies), 
+                                    cookies_browser=args.cookies)
+            if success:
+                print(f"\n📂 Audio saved in folder: {download_folder}")
+            else:
+                print("\n❌ Download failed. Please check the URL and try again.")
         else:
-            print("\n❌ Download failed. Please check the URL and try again.")
+            success, title, video_id, duration, error = download_video(args.url, download_folder, 
+                                    use_cookies=bool(args.cookies), 
+                                    cookies_browser=args.cookies)
+            if success:
+                print(f"\n📂 Video saved in folder: {download_folder}")
+            else:
+                print("\n❌ Download failed. Please check the URL and try again.")
     
     elif args.file:
-        # File mode
+        # File mode - detect type from filename if it contains 'mp3' or 'mp4'
+        if 'mp3' in os.path.basename(args.file).lower():
+            download_type = 'audio'
+        elif 'mp4' in os.path.basename(args.file).lower():
+            download_type = 'video'
+        
+        # Get base path for detected type if not overridden
+        if not args.output:
+            base_path = get_default_download_dir(download_type)
+        
+        # Create folder with package number
+        download_folder = create_download_folder(base_path, download_type)
+        
         print(f"\n📄 Loading URLs from file: {args.file}")
         urls = read_urls_from_file(args.file)
         
@@ -518,11 +709,12 @@ def main():
         download_multiple_videos(urls, download_folder,
                                 use_cookies=bool(args.cookies),
                                 cookies_browser=args.cookies,
-                                input_file=args.file)
+                                input_file=args.file,
+                                download_type=download_type)
     
     else:
-        # Interactive mode
-        interactive_mode(download_folder)
+        # Interactive mode - will create folder in interactive_mode function
+        interactive_mode(base_path, download_type)
 
 if __name__ == "__main__":
     main()

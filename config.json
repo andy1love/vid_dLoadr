@@ -34,5 +34,7 @@
     "thumbnail_size": "medium",
     "sort_by": "views",
     "output_dir": "./video_reports"
-  }
+  },
+  "download_dir_mp4": "~/Library/Mobile Documents/com~apple~CloudDocs/Zen/MP4",
+  "download_dir_mp3": "~/Library/Mobile Documents/com~apple~CloudDocs/Zen/MP3"
 }
