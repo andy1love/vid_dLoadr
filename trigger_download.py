@@ -8,6 +8,40 @@ import subprocess
 import sys
 import os
 import glob
+import json
+
+def load_config():
+    """Load configuration from config.json
+    Returns: dict with config values, or empty dict if file not found"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'config.json')
+    
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️  Warning: Could not load config.json: {e}")
+            return {}
+    return {}
+
+def get_default_download_dir(file_type='video'):
+    """Get default download directory from config.json based on file type
+    file_type: 'video' for MP4, 'audio' for MP3
+    Returns: base directory path for the file type"""
+    config = load_config()
+    
+    if file_type == 'audio':
+        download_dir = config.get('download_dir_mp3', None)
+    else:
+        download_dir = config.get('download_dir_mp4', None)
+    
+    if download_dir:
+        # Expand user home directory if path starts with ~
+        return os.path.expanduser(download_dir)
+    
+    # Fallback to default
+    return os.path.join(os.path.expanduser("~"), "Downloads", "Videos")
 
 def run_sync_notes():
     """Run sync_notes_to_urls.py to sync URLs from Notes to urls.txt
@@ -69,6 +103,55 @@ def find_latest_timestamped_file(urls_dir):
     # Sort by modification time, most recent first
     files.sort(key=os.path.getmtime, reverse=True)
     return files[0]
+
+def run_sync_to_infuse(log_files, download_dir, dry_run=False):
+    """Run sync_to_infuse.py to copy files to iCloud Drive
+    Returns: success status"""
+    print("\n" + "=" * 60)
+    print("   STEP 2.5: SYNC TO INFUSE (iCloud Drive)")
+    print("=" * 60)
+    print()
+    
+    script_path = os.path.join(os.path.dirname(__file__), 'sync_to_infuse.py')
+    
+    if not log_files:
+        print("⏭️  No log files to sync")
+        return True
+    
+    # Filter to only existing log files
+    existing_logs = [f for f in log_files if f and os.path.exists(f)]
+    if not existing_logs:
+        print("⏭️  No valid log files found for syncing")
+        return True
+    
+    try:
+        # Build command - process all log files
+        cmd = [sys.executable, script_path]
+        
+        # Add all log files as positional arguments (sync_to_infuse.py accepts multiple)
+        cmd.extend(existing_logs)
+        
+        if download_dir:
+            cmd.extend(['--download-dir', download_dir])
+        
+        if dry_run:
+            cmd.append('--dry-run')
+        
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=False,
+            text=True
+        )
+        
+        return result.returncode == 0
+        
+    except FileNotFoundError:
+        print(f"❌ Error: Could not find sync_to_infuse.py at {script_path}")
+        return False
+    except Exception as e:
+        print(f"❌ Error running sync script: {e}")
+        return False
 
 def run_clean_up(log_file, download_dir, note_title="Download_URLs", dry_run=False):
     """Run clean_up.py to verify downloads and update iCloud Notes"""
@@ -225,6 +308,12 @@ Examples:
     )
     
     parser.add_argument(
+        '--skip-sync-infuse',
+        action='store_true',
+        help='Skip syncing files to INFUSE/iCloud Drive'
+    )
+    
+    parser.add_argument(
         '--skip-cleanup',
         action='store_true',
         help='Skip the clean up step after downloads'
@@ -298,21 +387,41 @@ Examples:
         if not mp4_success:
             download_success = False
     
+    # Step 2.5: Sync to INFUSE (iCloud Drive)
+    sync_infuse_success = None
+    if not args.skip_sync_infuse and download_success and log_files:
+        # Note: sync_to_infuse.py will determine the correct directory per log file
+        # based on file type (MP3 vs MP4), so we don't need to specify it here
+        # If --output is provided, it will override the config for all files
+        default_download_dir = None  # Let sync_to_infuse.py use config per file type
+        
+        sync_infuse_success = run_sync_to_infuse(
+            log_files=log_files,
+            download_dir=args.output,  # Only use if provided, otherwise None
+            dry_run=False  # Always run for real (not dry-run)
+        )
+    elif args.skip_sync_infuse:
+        print("\n⏭️  Skipping INFUSE sync step (--skip-sync-infuse flag used)")
+    elif not log_files or not any(os.path.exists(f) for f in log_files if f):
+        print(f"\n⚠️  Log files not found")
+        print("   Skipping INFUSE sync step")
+    
     # Step 3: Clean up (verify downloads and update Notes)
     cleanup_success = None
     if not args.skip_cleanup and download_success and log_files:
         # Get note title from sync result or use default
         note_title = "Download_URLs"  # Default
         
-        # Use default download directory if not specified
-        default_download_dir = os.path.join(os.path.expanduser("~"), "Downloads", "Videos")
+        # Note: clean_up.py will determine the correct directory per log file
+        # based on file type (MP3 vs MP4), so we don't need to specify it here
+        # If --output is provided, it will override the config for all files
         
         # Run clean up for each log file
         for log_file in log_files:
             if log_file and os.path.exists(log_file):
                 cleanup_success = run_clean_up(
                     log_file=log_file,
-                    download_dir=args.output if args.output else default_download_dir,
+                    download_dir=args.output,  # Only use if provided, otherwise None
                     note_title=note_title,
                     dry_run=args.cleanup_dry_run
                 )
@@ -340,6 +449,14 @@ Examples:
             print("   • MP4 downloads: Completed")
     else:
         print("❌ Download: Failed or had errors")
+    
+    if sync_infuse_success is not None:
+        if sync_infuse_success:
+            print("✅ INFUSE Sync: Completed")
+        else:
+            print("⚠️  INFUSE Sync: Completed with warnings")
+    elif not args.skip_sync_infuse:
+        print("⏭️  INFUSE Sync: Skipped (no log files)")
     
     if cleanup_success is not None:
         if cleanup_success:

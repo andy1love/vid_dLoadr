@@ -12,9 +12,43 @@ import csv
 import argparse
 import subprocess
 import glob
+import json
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 from html.parser import HTMLParser
+
+def load_config():
+    """Load configuration from config.json
+    Returns: dict with config values, or empty dict if file not found"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'config.json')
+    
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️  Warning: Could not load config.json: {e}")
+            return {}
+    return {}
+
+def get_default_download_dir(file_type='video'):
+    """Get default download directory from config.json based on file type
+    file_type: 'video' for MP4, 'audio' for MP3
+    Returns: base directory path for the file type"""
+    config = load_config()
+    
+    if file_type == 'audio':
+        download_dir = config.get('download_dir_mp3', None)
+    else:
+        download_dir = config.get('download_dir_mp4', None)
+    
+    if download_dir:
+        # Expand user home directory if path starts with ~
+        return os.path.expanduser(download_dir)
+    
+    # Fallback to default
+    return os.path.join(os.path.expanduser("~"), "Downloads", "Videos")
 
 class HTMLTextExtractor(HTMLParser):
     """Extract plain text from HTML"""
@@ -163,25 +197,26 @@ def extract_video_id(url):
 
 def find_downloaded_file(video_id, download_base_dir, file_type='video'):
     """Find downloaded file (MP3 or MP4) by video ID
-    file_type: 'video' for MP4, 'audio' for MP3"""
+    file_type: 'video' for MP4, 'audio' for MP3
+    Searches in dated package folders (YYYYMMDD_## format)"""
     if not video_id:
         return None
     
-    # Determine file extension and subfolder based on type
+    # Determine file extension based on type
     if file_type == 'audio':
         ext = 'mp3'
-        subfolder = 'mp3'
     else:
         ext = 'mp4'
-        subfolder = 'video'
     
-    # Search in dated folders (YYYYMMDD format) with subfolder
-    today = datetime.now().strftime('%Y%m%d')
+    # Search in dated package folders (YYYYMMDD_## format)
+    # Search patterns: look in all dated package folders
     search_patterns = [
-        os.path.join(download_base_dir, today, subfolder, f'*{video_id}*.{ext}'),
-        os.path.join(download_base_dir, today, f'*{video_id}*.{ext}'),  # Fallback: check base folder
-        os.path.join(download_base_dir, '*', subfolder, f'*{video_id}*.{ext}'),  # Any dated folder
-        os.path.join(download_base_dir, '*', f'*{video_id}*.{ext}'),  # Any dated folder, base level
+        # Today's packages
+        os.path.join(download_base_dir, f'{datetime.now().strftime("%Y%m%d")}_*', f'*{video_id}*.{ext}'),
+        # Any date's packages
+        os.path.join(download_base_dir, '*_*', f'*{video_id}*.{ext}'),
+        # Fallback: direct in base (unlikely but possible)
+        os.path.join(download_base_dir, f'*{video_id}*.{ext}'),
     ]
     
     for pattern in search_patterns:
@@ -449,10 +484,12 @@ def interactive_mode():
     # Prompt for optional settings
     print("\n⚙️  Optional settings (press Enter to use defaults):")
     
-    default_download_dir = os.path.join(os.path.expanduser("~"), "Downloads", "Videos")
-    download_dir = input(f"   Download directory [default: {default_download_dir}]: ").strip()
+    # Note: In interactive mode, we'll detect file type from log file
+    # For now, use video as default, but this will be updated based on log file
+    default_download_dir = get_default_download_dir('video')
+    download_dir = input(f"   Download directory [default: auto-detect from log]: ").strip()
     if not download_dir:
-        download_dir = default_download_dir
+        download_dir = None  # Will be set based on file type
     
     note_title = input("   iCloud Note title [default: Download_URLs]: ").strip()
     if not note_title:
@@ -492,8 +529,8 @@ Examples:
     parser.add_argument(
         '--download-dir',
         type=str,
-        default=os.path.join(os.path.expanduser("~"), "Downloads", "Videos"),
-        help='Base download directory (default: ~/Downloads/Videos)'
+        default=None,  # Will be set to config value or default in main()
+        help='Base download directory (default: from config.json or ~/Downloads/Videos)'
     )
     
     parser.add_argument(
@@ -521,10 +558,15 @@ Examples:
         download_dir = interactive_args['download_dir']
         note_title = interactive_args['note']
         dry_run = interactive_args['dry_run']
+        # Detect file type from log filename
+        file_type = detect_file_type_from_log_filename(log_file)
     else:
         # Use command line arguments
         log_file = args.log_file
-        download_dir = args.download_dir
+        # Detect file type from log filename to use correct directory
+        file_type = detect_file_type_from_log_filename(log_file)
+        # Use --download-dir if provided, otherwise use config-based directory for this file type
+        download_dir = args.download_dir if args.download_dir else get_default_download_dir(file_type)
         note_title = args.note
         dry_run = args.dry_run
     
@@ -553,8 +595,7 @@ Examples:
     verified_count = 0
     not_found_count = 0
     
-    # Detect file type from log filename
-    file_type = detect_file_type_from_log_filename(log_file)
+    # file_type was already detected above, use it here
     file_type_name = "MP3" if file_type == 'audio' else "MP4"
     
     print("\n" + "=" * 60)

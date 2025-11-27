@@ -13,6 +13,39 @@ import json
 from datetime import datetime
 import subprocess
 
+def load_config():
+    """Load configuration from config.json
+    Returns: dict with config values, or empty dict if file not found"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'config.json')
+    
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"⚠️  Warning: Could not load config.json: {e}")
+            return {}
+    return {}
+
+def get_default_download_dir(download_type='video'):
+    """Get default download directory from config.json based on download type
+    download_type: 'video' for MP4, 'audio' for MP3
+    Returns: base directory path for the download type"""
+    config = load_config()
+    
+    if download_type == 'audio':
+        download_dir = config.get('download_dir_mp3', None)
+    else:
+        download_dir = config.get('download_dir_mp4', None)
+    
+    if download_dir:
+        # Expand user home directory if path starts with ~
+        return os.path.expanduser(download_dir)
+    
+    # Fallback to default
+    return os.path.join(os.path.expanduser("~"), "Downloads", "Videos")
+
 def check_yt_dlp():
     """Check if yt-dlp is installed"""
     try:
@@ -66,19 +99,36 @@ def read_urls_from_file(file_path):
         print(f"❌ Error reading file {file_path}: {e}")
         return []
 
-def create_download_folder(base_path, subfolder=''):
-    """Create a dated folder for today's downloads
-    subfolder: 'mp3' or 'video' or '' for base folder"""
+def create_download_folder(base_path, download_type='video'):
+    """Create a dated folder with package number for today's downloads
+    download_type: 'video' for MP4, 'audio' for MP3
+    Returns: folder path in format YYYYMMDD_## (e.g., 20251125_01)"""
     today = datetime.now().strftime('%Y%m%d')
-    folder_path = os.path.join(base_path, today)
     
-    if subfolder:
-        folder_path = os.path.join(folder_path, subfolder)
-    
-    # Create folder if it doesn't exist
-    os.makedirs(folder_path, exist_ok=True)
-    
-    return folder_path
+    # Find the next available package number for today
+    package_num = 1
+    while True:
+        folder_name = f"{today}_{package_num:02d}"
+        folder_path = os.path.join(base_path, folder_name)
+        
+        # If folder doesn't exist, use this number
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path, exist_ok=True)
+            return folder_path
+        
+        # If folder exists, check if it's empty or being used
+        # For now, we'll increment to avoid conflicts
+        # In the future, could check if folder is empty or has recent activity
+        package_num += 1
+        
+        # Safety limit (unlikely to hit 100 packages in one day)
+        if package_num > 99:
+            # Fallback: use timestamp to make it unique
+            timestamp = datetime.now().strftime('%H%M%S')
+            folder_name = f"{today}_{timestamp}"
+            folder_path = os.path.join(base_path, folder_name)
+            os.makedirs(folder_path, exist_ok=True)
+            return folder_path
 
 def get_video_info(url, use_cookies=False, cookies_browser=None):
     """Get video metadata using yt-dlp JSON output"""
@@ -447,8 +497,8 @@ Examples:
     parser.add_argument(
         '--output', 
         type=str, 
-        default=os.path.join(os.path.expanduser("~"), "Downloads", "Videos"),
-        help='Base output directory (default: ~/Downloads/Videos)'
+        default=None,  # Will be set to config value or default in main()
+        help='Base output directory (default: from config.json or ~/Downloads/Videos)'
     )
     
     parser.add_argument(
@@ -468,7 +518,7 @@ Examples:
     
     return parser.parse_args()
 
-def interactive_mode(download_folder):
+def interactive_mode(base_path, initial_download_type='video'):
     """Interactive mode - prompt user for input"""
     print("\n" + "=" * 50)
     print("   INTERACTIVE MODE")
@@ -482,16 +532,12 @@ def interactive_mode(download_folder):
     download_type = 'audio' if type_choice == '2' else 'video'
     download_type_name = "MP3s" if download_type == 'audio' else "Videos"
     
-    # Update download folder based on type
-    base_path = os.path.dirname(download_folder) if os.path.basename(download_folder).isdigit() else download_folder
-    if os.path.basename(download_folder).isdigit():
-        # We're in a dated folder, go up one level
-        base_path = os.path.dirname(download_folder)
-    else:
-        base_path = download_folder
+    # Get base path for the selected type if not overridden
+    if not base_path or base_path == os.path.join(os.path.expanduser("~"), "Downloads", "Videos"):
+        base_path = get_default_download_dir(download_type)
     
-    subfolder = 'mp3' if download_type == 'audio' else 'video'
-    download_folder = create_download_folder(base_path, subfolder)
+    # Create folder with package number
+    download_folder = create_download_folder(base_path, download_type)
     print(f"\n📁 {download_type_name} will be saved to: {download_folder}")
     
     # Ask about cookies once
@@ -555,11 +601,24 @@ def interactive_mode(download_folder):
                 print("❌ No valid URLs found in file.")
                 continue
             
+            # Detect download type from filename if it contains 'mp3' or 'mp4'
+            if 'mp3' in os.path.basename(file_path).lower():
+                download_type = 'audio'
+                download_type_name = "MP3s"
+            elif 'mp4' in os.path.basename(file_path).lower():
+                download_type = 'video'
+                download_type_name = "Videos"
+            
+            # Get base path for detected type
+            file_base_path = get_default_download_dir(download_type)
+            file_download_folder = create_download_folder(file_base_path, download_type)
+            print(f"\n📁 Files will be saved to: {file_download_folder}")
+            
             # Confirm before downloading
             print(f"\nFound {len(urls)} URLs. Proceed with {download_type_name.lower()} download? (y/n): ", end="")
             confirm = input().strip().lower()
             if confirm in ['y', 'yes']:
-                download_multiple_videos(urls, download_folder, use_cookies, cookies_browser, input_file=file_path, download_type=download_type)
+                download_multiple_videos(urls, file_download_folder, use_cookies, cookies_browser, input_file=file_path, download_type=download_type)
             else:
                 print("Download cancelled.")
         
@@ -574,9 +633,6 @@ def main():
     # Parse command line arguments
     args = parse_arguments()
     
-    # Base download path
-    base_path = args.output
-    
     print("=" * 50)
     print("   VIDEO DOWNLOADER (403 Error Fixed)")
     print("   Supports: YouTube & Instagram")
@@ -590,12 +646,17 @@ def main():
     print("\n💡 TIP: If you're getting 403 errors, update yt-dlp:")
     print("   pip install --upgrade yt-dlp")
     
-    # Determine download type and subfolder
+    # Determine download type
     download_type = args.type
-    subfolder = 'mp3' if download_type == 'audio' else 'video'
     
-    # Create today's folder with appropriate subfolder
-    download_folder = create_download_folder(base_path, subfolder)
+    # Get base download path - use --output if provided, otherwise use config or default
+    if args.output:
+        base_path = args.output
+    else:
+        base_path = get_default_download_dir(download_type)
+    
+    # Create today's folder with package number
+    download_folder = create_download_folder(base_path, download_type)
     print(f"\n📁 Downloads will be saved to: {download_folder}")
     
     # Determine mode based on arguments
@@ -628,12 +689,15 @@ def main():
         # File mode - detect type from filename if it contains 'mp3' or 'mp4'
         if 'mp3' in os.path.basename(args.file).lower():
             download_type = 'audio'
-            subfolder = 'mp3'
-            download_folder = create_download_folder(base_path, subfolder)
         elif 'mp4' in os.path.basename(args.file).lower():
             download_type = 'video'
-            subfolder = 'video'
-            download_folder = create_download_folder(base_path, subfolder)
+        
+        # Get base path for detected type if not overridden
+        if not args.output:
+            base_path = get_default_download_dir(download_type)
+        
+        # Create folder with package number
+        download_folder = create_download_folder(base_path, download_type)
         
         print(f"\n📄 Loading URLs from file: {args.file}")
         urls = read_urls_from_file(args.file)
@@ -649,9 +713,8 @@ def main():
                                 download_type=download_type)
     
     else:
-        # Interactive mode - create base folder first
-        base_download_folder = create_download_folder(base_path)
-        interactive_mode(base_download_folder)
+        # Interactive mode - will create folder in interactive_mode function
+        interactive_mode(base_path, download_type)
 
 if __name__ == "__main__":
     main()
