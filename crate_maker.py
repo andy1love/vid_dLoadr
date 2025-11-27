@@ -43,7 +43,7 @@ Input can be either:
 import os
 import argparse
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 # --- iCloud mapping constants ---
 
@@ -205,7 +205,7 @@ def write_legacy_crate(mapped_paths: List[str], output_file: Path) -> None:
 
 # --- Modern Serato .crate generation using pyserato (binary) ---
 
-def write_modern_crate(mapped_paths: List[str], output_file: Path, serato_root: Path | None) -> None:
+def write_modern_crate(mapped_paths: List[str], output_file: Path, serato_root: Optional[Path]) -> None:
     """
     Write a modern Serato .crate file using pyserato.
 
