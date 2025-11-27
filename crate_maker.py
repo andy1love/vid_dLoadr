@@ -41,6 +41,7 @@ Input can be either:
 """
 
 import os
+import json
 import argparse
 from pathlib import Path
 from typing import List, Tuple, Optional
@@ -48,6 +49,32 @@ from typing import List, Tuple, Optional
 # --- iCloud mapping constants ---
 
 ICLOUD_MARKER = "Library/Mobile Documents/com~apple~CloudDocs"
+
+# --- Config loading ---
+
+def load_config() -> dict:
+    """Load configuration from config.json."""
+    config_path = Path(__file__).parent / "config.json"
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise SystemExit(f"Config file not found: {config_path}")
+    except json.JSONDecodeError as e:
+        raise SystemExit(f"Error parsing config.json: {e}")
+
+def get_output_dir() -> Path:
+    """Get the configured output directory for crate files."""
+    config = load_config()
+    output_dir = config.get("crate_output_dir", "/Volumes/256_music/_Serato_/Subcrates")
+    output_path = Path(output_dir).expanduser().resolve()
+    
+    # Create directory if it doesn't exist
+    if not output_path.exists():
+        output_path.mkdir(parents=True, exist_ok=True)
+        print(f"Created output directory: {output_path}")
+    
+    return output_path
 
 def map_to_local_icloud(original_path: str) -> str:
     """
@@ -160,8 +187,9 @@ def write_m3u(mapped_paths: List[str], output_file: Path) -> None:
     if output_file.suffix.lower() != ".m3u":
         output_file = output_file.with_suffix(".m3u")
 
-    if output_file.parent and not output_file.parent.exists():
-        output_file.parent.mkdir(parents=True, exist_ok=True)
+    # Use configured output directory
+    output_dir = get_output_dir()
+    output_file = output_dir / output_file.name
 
     with output_file.open("w", encoding="utf-8") as f:
         f.write("#EXTM3U\n")
@@ -191,8 +219,9 @@ def write_legacy_crate(mapped_paths: List[str], output_file: Path) -> None:
     if output_file.suffix.lower() != ".crate":
         output_file = output_file.with_suffix(".crate")
 
-    if output_file.parent and not output_file.parent.exists():
-        output_file.parent.mkdir(parents=True, exist_ok=True)
+    # Use configured output directory
+    output_dir = get_output_dir()
+    output_file = output_dir / output_file.name
 
     with output_file.open("w", encoding="utf-8") as f:
         f.write("v2.0\n")
@@ -246,10 +275,15 @@ def write_modern_crate(mapped_paths: List[str], output_file: Path, serato_root: 
         builder.save(crate, root_path=serato_root)
         subcrates_dir = serato_root / "SubCrates"
     else:
-        # Use pyserato's default Serato folder
-        builder.save(crate)
-        # Typical default location:
-        subcrates_dir = Path.home() / "Music" / "Serato" / "SubCrates"
+        # Use configured output directory (parent of Subcrates)
+        output_dir = get_output_dir()
+        # output_dir is already /Volumes/256_music/_Serato_/Subcrates
+        # serato_root should be /Volumes/256_music/_Serato_
+        serato_root = output_dir.parent
+        if not serato_root.exists():
+            serato_root.mkdir(parents=True, exist_ok=True)
+        builder.save(crate, root_path=serato_root)
+        subcrates_dir = output_dir
 
     crate_path = subcrates_dir / f"{crate_name}.crate"
 
