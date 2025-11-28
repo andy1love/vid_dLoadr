@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Sync to INFUSE Script
-Copies downloaded MP3 and MP4 files to iCloud Drive for INFUSE app
+Sync to iCloud Script
+Copies downloaded MP3 and MP4 files to iCloud Drive
 Tracks synced files to avoid duplicates
 """
 
@@ -209,7 +209,7 @@ def read_log_csv(log_file):
         return []
 
 def sync_log_to_infuse(log_file, download_base_dir, icloud_paths, tracking_data, dry_run=False):
-    """Sync files from log to INFUSE iCloud Drive folder"""
+    """Sync files from log to iCloud Drive folder"""
     # Detect file type from log filename
     file_type = detect_file_type_from_log_filename(log_file)
     file_type_name = "MP3" if file_type == 'audio' else "MP4"
@@ -309,13 +309,13 @@ def sync_log_to_infuse(log_file, download_base_dir, icloud_paths, tracking_data,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sync downloaded files to INFUSE via iCloud Drive",
+        description="Sync downloaded files to iCloud Drive",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python sync_to_infuse.py log.csv                    # Sync from log file
-  python sync_to_infuse.py --all                       # Sync all recent logs
-  python sync_to_infuse.py log.csv --dry-run          # Preview changes
+  python sync_to_icloud.py log.csv                    # Sync from log file
+  python sync_to_icloud.py --all                       # Sync all recent logs
+  python sync_to_icloud.py log.csv --dry-run          # Preview changes
         """
     )
     
@@ -354,7 +354,7 @@ Examples:
     args = parser.parse_args()
     
     print("\n" + "=" * 60)
-    print("   SYNC TO INFUSE (iCloud Drive)")
+    print("   SYNC TO iCLOUD DRIVE")
     print("=" * 60)
     
     # Get iCloud paths
