@@ -536,10 +536,6 @@ def interactive_mode(base_path, initial_download_type='video'):
     if not base_path or base_path == os.path.join(os.path.expanduser("~"), "Downloads", "Videos"):
         base_path = get_default_download_dir(download_type)
     
-    # Create folder with package number
-    download_folder = create_download_folder(base_path, download_type)
-    print(f"\n📁 {download_type_name} will be saved to: {download_folder}")
-    
     # Ask about cookies once
     use_cookies = False
     cookies_browser = None
@@ -559,6 +555,9 @@ def interactive_mode(base_path, initial_download_type='video'):
             use_cookies = True
             print(f"✅ Will use cookies from {cookies_browser}")
     
+    # Track folder for single URL downloads (created on first use)
+    download_folder = None
+    
     while True:
         print("\n" + "=" * 50)
         print("Choose an option:")
@@ -569,7 +568,11 @@ def interactive_mode(base_path, initial_download_type='video'):
         choice = input("\nEnter your choice (1-3): ").strip()
         
         if choice == '1':
-            # Single URL mode
+            # Single URL mode - create folder on first use
+            if download_folder is None:
+                download_folder = create_download_folder(base_path, download_type)
+                print(f"\n📁 {download_type_name} will be saved to: {download_folder}")
+            
             url = input(f"\nPaste the {download_type_name.lower()} URL: ").strip()
             if not url:
                 print("❌ No URL provided.")
@@ -655,13 +658,12 @@ def main():
     else:
         base_path = get_default_download_dir(download_type)
     
-    # Create today's folder with package number
-    download_folder = create_download_folder(base_path, download_type)
-    print(f"\n📁 Downloads will be saved to: {download_folder}")
-    
     # Determine mode based on arguments
     if args.url:
         # Single URL mode
+        # Create folder with package number for this download
+        download_folder = create_download_folder(base_path, download_type)
+        print(f"\n📁 Downloads will be saved to: {download_folder}")
         print(f"\n🔗 Downloading single URL: {args.url}")
         
         if not (args.url.startswith('http://') or args.url.startswith('https://')):
