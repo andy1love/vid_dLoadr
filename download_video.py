@@ -117,8 +117,18 @@ def create_download_folder(base_path, download_type='video'):
             return folder_path
         
         # If folder exists, check if it's empty or being used
-        # For now, we'll increment to avoid conflicts
-        # In the future, could check if folder is empty or has recent activity
+        # Reuse empty folders instead of creating new ones
+        try:
+            # Check if folder is empty (ignore hidden files like .DS_Store)
+            contents = [f for f in os.listdir(folder_path) if not f.startswith('.')]
+            if len(contents) == 0:
+                # Folder is empty, reuse it
+                return folder_path
+        except (PermissionError, OSError):
+            # If we can't read the folder, skip it and create a new one
+            pass
+        
+        # Folder exists and has content, increment to next number
         package_num += 1
         
         # Safety limit (unlikely to hit 100 packages in one day)
