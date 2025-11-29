@@ -30,7 +30,7 @@ py/
 ├── sync_notes_to_urls.py   # Syncs URLs from iCloud Notes
 ├── download_video.py        # Downloads videos and creates logs
 ├── trigger_download.py      # Main automation trigger
-├── sync_to_infuse.py        # Syncs downloaded files to iCloud Drive
+├── sync_to_icloud.py        # Syncs downloaded files to iCloud Drive
 ├── clean_up.py             # Verifies downloads and updates Notes
 └── workarea/
     ├── urls/               # URL files (timestamped)
@@ -113,7 +113,7 @@ python3 trigger_download.py
 # Skip sync (use existing URLs)
 python3 trigger_download.py --skip-sync
 
-# Skip INFUSE sync
+# Skip iCloud sync
 python3 trigger_download.py --skip-sync-infuse
 
 # Skip clean up
@@ -131,15 +131,15 @@ python3 trigger_download.py --file /path/to/urls.txt
 
 **Options:**
 - `--skip-sync` - Skip syncing from Notes
-- `--skip-sync-infuse` - Skip syncing files to iCloud Drive
+- `--skip-sync-infuse` - Skip syncing files to iCloud Drive (flag name kept for backward compatibility)
 - `--skip-cleanup` - Skip verification and Note updates
 - `--cleanup-dry-run` - Preview clean up changes
 - `--file <path>` - Use specific URLs file
 - `--output <dir>` - Custom download directory
 - `--cookies <browser>` - Use browser cookies (chrome/firefox/safari/edge)
 
-### `sync_to_infuse.py`
-Syncs downloaded MP3 and MP4 files to iCloud Drive for the INFUSE app.
+### `sync_to_icloud.py`
+Syncs downloaded MP3 and MP4 files to iCloud Drive.
 
 **Features:**
 - Copies downloaded files to iCloud Drive INFUSE folder
@@ -150,24 +150,26 @@ Syncs downloaded MP3 and MP4 files to iCloud Drive for the INFUSE app.
 **Usage:**
 ```bash
 # Sync from specific log file
-python3 sync_to_infuse.py log.csv
+python3 sync_to_icloud.py log.csv
 
 # Sync multiple log files
-python3 sync_to_infuse.py log1.csv log2.csv
+python3 sync_to_icloud.py log1.csv log2.csv
 
 # Sync all recent logs
-python3 sync_to_infuse.py --all
+python3 sync_to_icloud.py --all
 
 # Dry run (preview changes)
-python3 sync_to_infuse.py log.csv --dry-run
+python3 sync_to_icloud.py log.csv --dry-run
 
 # Custom download directory
-python3 sync_to_infuse.py log.csv --download-dir /path/to/downloads
+python3 sync_to_icloud.py log.csv --download-dir /path/to/downloads
 ```
 
 **Output:**
 - MP3 files: `~/Library/Mobile Documents/com~apple~CloudDocs/Infuse/MP3/YYYYMMDD/`
 - MP4 files: `~/Library/Mobile Documents/com~apple~CloudDocs/Infuse/MP4/YYYYMMDD/`
+
+Note: Files are synced to the INFUSE folder in iCloud Drive, but the script name reflects the general iCloud sync functionality.
 
 ### `clean_up.py`
 Verifies successful downloads and updates iCloud Notes.

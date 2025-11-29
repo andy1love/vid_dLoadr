@@ -104,15 +104,15 @@ def find_latest_timestamped_file(urls_dir):
     files.sort(key=os.path.getmtime, reverse=True)
     return files[0]
 
-def run_sync_to_infuse(log_files, download_dir, dry_run=False):
-    """Run sync_to_infuse.py to copy files to iCloud Drive
+def run_sync_to_icloud(log_files, download_dir, dry_run=False):
+    """Run sync_to_icloud.py to copy files to iCloud Drive
     Returns: success status"""
     print("\n" + "=" * 60)
-    print("   STEP 2.5: SYNC TO INFUSE (iCloud Drive)")
+    print("   STEP 2.5: SYNC TO iCLOUD DRIVE")
     print("=" * 60)
     print()
     
-    script_path = os.path.join(os.path.dirname(__file__), 'sync_to_infuse.py')
+    script_path = os.path.join(os.path.dirname(__file__), 'sync_to_icloud.py')
     
     if not log_files:
         print("⏭️  No log files to sync")
@@ -128,7 +128,7 @@ def run_sync_to_infuse(log_files, download_dir, dry_run=False):
         # Build command - process all log files
         cmd = [sys.executable, script_path]
         
-        # Add all log files as positional arguments (sync_to_infuse.py accepts multiple)
+        # Add all log files as positional arguments (sync_to_icloud.py accepts multiple)
         cmd.extend(existing_logs)
         
         if download_dir:
@@ -147,10 +147,86 @@ def run_sync_to_infuse(log_files, download_dir, dry_run=False):
         return result.returncode == 0
         
     except FileNotFoundError:
-        print(f"❌ Error: Could not find sync_to_infuse.py at {script_path}")
+        print(f"❌ Error: Could not find sync_to_icloud.py at {script_path}")
         return False
     except Exception as e:
         print(f"❌ Error running sync script: {e}")
+        return False
+
+def run_import_on_imac(log_files, dry_run=False):
+    """Run import_and_create_playlists.py on iMac via SSH
+    Returns: success status"""
+    print("\n" + "=" * 60)
+    print("   STEP 2.6: IMPORT TO MUSIC ON iMAC")
+    print("=" * 60)
+    print()
+    
+    config = load_config()
+    imac_config = config.get('imac', {})
+    
+    if not imac_config.get('enabled', False):
+        print("⏭️  iMac import is disabled in config.json")
+        return True
+    
+    hostname = imac_config.get('hostname', '')
+    username = imac_config.get('username', '')
+    script_path = imac_config.get('script_path', '')
+    
+    if not hostname or not username or not script_path:
+        print("⚠️  iMac configuration incomplete. Please check config.json")
+        return False
+    
+    # Check if we have any MP3 log files
+    mp3_logs = [f for f in log_files if f and os.path.exists(f) and 'mp3' in os.path.basename(f).lower()]
+    
+    if not mp3_logs:
+        print("⏭️  No MP3 log files found - skipping iMac import")
+        return True
+    
+    print(f"   Found {len(mp3_logs)} MP3 log file(s)")
+    
+    # Build SSH command
+    # SSH to iMac and run import_and_create_playlists.py with --all-date-folders
+    # This will process all date folders found in the base MP3 directory
+    remote_script = os.path.join(script_path, 'import_and_create_playlists.py')
+    
+    # Use --all-date-folders to process all folders in the base directory
+    ssh_cmd = [
+        'ssh',
+        f'{username}@{hostname}',
+        f'cd {script_path} && python3 {remote_script} --all-date-folders'
+    ]
+    
+    if dry_run:
+        ssh_cmd.append('--dry-run')
+    
+    print(f"\n📡 Connecting to iMac ({hostname})...")
+    print(f"   Running: {remote_script}")
+    
+    try:
+        result = subprocess.run(
+            ssh_cmd,
+            check=False,
+            capture_output=False,
+            text=True,
+            timeout=600  # 10 minute timeout
+        )
+        
+        if result.returncode == 0:
+            print("\n✅ iMac import completed successfully!")
+            return True
+        else:
+            print(f"\n⚠️  iMac import completed with exit code {result.returncode}")
+            return False
+            
+    except subprocess.TimeoutExpired:
+        print("\n❌ SSH command timed out (iMac may be unreachable)")
+        return False
+    except FileNotFoundError:
+        print("\n❌ Error: SSH command not found. Is SSH installed?")
+        return False
+    except Exception as e:
+        print(f"\n❌ Error running SSH command: {e}")
         return False
 
 def run_clean_up(log_file, download_dir, note_title="Download_URLs", dry_run=False):
@@ -310,7 +386,7 @@ Examples:
     parser.add_argument(
         '--skip-sync-infuse',
         action='store_true',
-        help='Skip syncing files to INFUSE/iCloud Drive'
+        help='Skip syncing files to iCloud Drive'
     )
     
     parser.add_argument(
@@ -323,6 +399,12 @@ Examples:
         '--cleanup-dry-run',
         action='store_true',
         help='Run clean up in dry-run mode (preview changes without applying)'
+    )
+    
+    parser.add_argument(
+        '--skip-import-imac',
+        action='store_true',
+        help='Skip importing to Music.app on iMac'
     )
     
     args = parser.parse_args()
@@ -387,24 +469,38 @@ Examples:
         if not mp4_success:
             download_success = False
     
-    # Step 2.5: Sync to INFUSE (iCloud Drive)
+    # Step 2.5: Sync to iCloud Drive
     sync_infuse_success = None
     if not args.skip_sync_infuse and download_success and log_files:
-        # Note: sync_to_infuse.py will determine the correct directory per log file
+        # Note: sync_to_icloud.py will determine the correct directory per log file
         # based on file type (MP3 vs MP4), so we don't need to specify it here
         # If --output is provided, it will override the config for all files
-        default_download_dir = None  # Let sync_to_infuse.py use config per file type
+        default_download_dir = None  # Let sync_to_icloud.py use config per file type
         
-        sync_infuse_success = run_sync_to_infuse(
+        sync_infuse_success = run_sync_to_icloud(
             log_files=log_files,
             download_dir=args.output,  # Only use if provided, otherwise None
             dry_run=False  # Always run for real (not dry-run)
         )
     elif args.skip_sync_infuse:
-        print("\n⏭️  Skipping INFUSE sync step (--skip-sync-infuse flag used)")
+        print("\n⏭️  Skipping iCloud sync step (--skip-sync-infuse flag used)")
     elif not log_files or not any(os.path.exists(f) for f in log_files if f):
         print(f"\n⚠️  Log files not found")
-        print("   Skipping INFUSE sync step")
+        print("   Skipping iCloud sync step")
+    
+    # Step 2.6: Import to Music.app on iMac (via SSH)
+    imac_import_success = None
+    if not args.skip_import_imac and sync_infuse_success and log_files:
+        imac_import_success = run_import_on_imac(
+            log_files=log_files,
+            dry_run=False
+        )
+    elif args.skip_import_imac:
+        print("\n⏭️  Skipping iMac import step (--skip-import-imac flag used)")
+    elif not sync_infuse_success:
+        print("\n⏭️  Skipping iMac import step (iCloud sync not completed)")
+    elif not log_files or not any(os.path.exists(f) for f in log_files if f):
+        print("\n⏭️  Skipping iMac import step (no log files)")
     
     # Step 3: Clean up (verify downloads and update Notes)
     cleanup_success = None
@@ -452,11 +548,19 @@ Examples:
     
     if sync_infuse_success is not None:
         if sync_infuse_success:
-            print("✅ INFUSE Sync: Completed")
+            print("✅ iCloud Sync: Completed")
         else:
-            print("⚠️  INFUSE Sync: Completed with warnings")
+            print("⚠️  iCloud Sync: Completed with warnings")
     elif not args.skip_sync_infuse:
-        print("⏭️  INFUSE Sync: Skipped (no log files)")
+        print("⏭️  iCloud Sync: Skipped (no log files)")
+    
+    if imac_import_success is not None:
+        if imac_import_success:
+            print("✅ iMac Import: Completed")
+        else:
+            print("⚠️  iMac Import: Completed with warnings")
+    elif not args.skip_import_imac:
+        print("⏭️  iMac Import: Skipped (not enabled or no MP3 files)")
     
     if cleanup_success is not None:
         if cleanup_success:

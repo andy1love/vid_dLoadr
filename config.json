@@ -37,5 +37,11 @@
   },
   "download_dir_mp4": "~/Library/Mobile Documents/com~apple~CloudDocs/Zen/MP4",
   "download_dir_mp3": "~/Library/Mobile Documents/com~apple~CloudDocs/Zen/MP3",
-  "crate_output_dir": "/Volumes/256_music/_Serato_/Subcrates"
+  "crate_output_dir": "/Volumes/256_music/_Serato_/Subcrates",
+  "imac": {
+    "hostname": "192.168.1.34",
+    "username": "zen",
+    "script_path": "/Users/zen/Desktop/vid_dLoadr",
+    "enabled": true
+  }
 }
