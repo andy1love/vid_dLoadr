@@ -140,13 +140,98 @@ def find_mp3_files(directory_path):
         return find_mp3_files_via_finder(directory_path)
 
 
+def check_files_already_imported(file_paths):
+    """Check which files are already in Music.app library by file path.
+    Returns: set of indices of files that are already imported."""
+    if not file_paths:
+        return set()
+    
+    print("   🔍 Checking for existing files in Music.app...")
+    
+    # Escape paths for AppleScript
+    escaped_paths = [path.replace('\\', '\\\\').replace('"', '\\"') for path in file_paths]
+    
+    # Build AppleScript to check each file path by location
+    # We check by file location (POSIX path) which is the most reliable way
+    check_statements = []
+    for i, path in enumerate(escaped_paths):
+        check_statements.append(f'''
+        try
+            set filePath to "{path}"
+            set fileAlias to POSIX file filePath as alias
+            set foundTrack to some track of library playlist 1 whose location is fileAlias
+            set end of results to "{i}:found"
+        on error
+            set end of results to "{i}:missing"
+        end try''')
+    
+    apple_script = f'''
+    tell application "Music"
+        set results to {{}}
+        {"".join(check_statements)}
+        return results as string
+    end tell
+    '''
+    
+    try:
+        result = subprocess.run(
+            ['osascript', '-e', apple_script],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode != 0:
+            print(f"   ⚠️  Warning: Could not check for existing files: {result.stderr.strip()}")
+            return set()  # If check fails, assume none are imported (safer to skip check than create duplicates)
+        
+        output = result.stdout.strip()
+        already_imported_indices = set()
+        
+        # Parse results - AppleScript returns list as string like "{0:found, 1:missing, ...}"
+        if output and output != '{}':
+            output = output.strip('{}')
+            for item in output.split(', '):
+                item = item.strip()
+                if ':found' in item:
+                    try:
+                        idx = int(item.split(':')[0])
+                        already_imported_indices.add(idx)
+                    except ValueError:
+                        pass
+        
+        return already_imported_indices
+        
+    except subprocess.TimeoutExpired:
+        print("   ⚠️  Warning: Timeout checking for existing files")
+        return set()
+    except Exception as e:
+        print(f"   ⚠️  Warning: Could not check for existing files: {e}")
+        return set()  # If check fails, assume none are imported
+
+
 def import_files_to_music(file_paths):
     """Import MP3 files to Music.app library using AppleScript."""
     if not file_paths:
         return False, "No files to import"
     
+    # Check which files are already imported
+    already_imported_indices = check_files_already_imported(file_paths)
+    
+    if already_imported_indices:
+        print(f"   ⏭️  Skipping {len(already_imported_indices)} file(s) already in library")
+    
+    # Filter out already imported files
+    files_to_import = [path for i, path in enumerate(file_paths) if i not in already_imported_indices]
+    
+    if not files_to_import:
+        skipped_count = len(already_imported_indices)
+        return True, f"imported:0|failed:0|failedFiles:{{}}|skipped:{skipped_count}"
+    
+    print(f"   📥 Importing {len(files_to_import)} new file(s)...")
+    
     # Escape paths for AppleScript
-    escaped_paths = [path.replace('\\', '\\\\').replace('"', '\\"') for path in file_paths]
+    escaped_paths = [path.replace('\\', '\\\\').replace('"', '\\"') for path in files_to_import]
     file_paths_script = ', '.join([f'POSIX file "{path}"' for path in escaped_paths])
     
     apple_script = f'''
@@ -191,6 +276,10 @@ def import_files_to_music(file_paths):
             return False, f"AppleScript error: {error_msg}"
         
         output = result.stdout.strip()
+        # Add skipped count to output if any files were skipped
+        skipped_count = len(already_imported_indices)
+        if skipped_count > 0:
+            output += f"|skipped:{skipped_count}"
         return True, output
         
     except subprocess.TimeoutExpired:
@@ -255,6 +344,7 @@ def parse_import_result(result_string):
     """Parse the import result string from AppleScript."""
     imported_count = 0
     failed_count = 0
+    skipped_count = 0
     failed_files = []
     
     try:
@@ -264,6 +354,8 @@ def parse_import_result(result_string):
                 imported_count = int(part.split(':')[1])
             elif part.startswith('failed:'):
                 failed_count = int(part.split(':')[1])
+            elif part.startswith('skipped:'):
+                skipped_count = int(part.split(':')[1])
             elif part.startswith('failedFiles:'):
                 failed_list = part.split(':', 1)[1]
                 # Parse AppleScript list format: {file1, file2, ...}
@@ -273,10 +365,10 @@ def parse_import_result(result_string):
     except Exception as e:
         pass  # Return defaults if parsing fails
     
-    return imported_count, failed_count, failed_files
+    return imported_count, failed_count, failed_files, skipped_count
 
 
-def print_report(file_names, imported_count, failed_count, failed_files, verification_results):
+def print_report(file_names, imported_count, failed_count, failed_files, verification_results, skipped_count=0):
     """Print a detailed report of the import process."""
     print("\n" + "=" * 70)
     print("   IMPORT REPORT")
@@ -285,6 +377,8 @@ def print_report(file_names, imported_count, failed_count, failed_files, verific
     print(f"\n📊 SUMMARY")
     print(f"   Total MP3 files found: {len(file_names)}")
     print(f"   Successfully imported: {imported_count}")
+    if skipped_count > 0:
+        print(f"   Skipped (already in library): {skipped_count}")
     print(f"   Failed to import: {failed_count}")
     
     verified_found = 0
@@ -374,7 +468,7 @@ Examples:
         sys.exit(1)
     
     # Parse import results
-    imported_count, failed_count, failed_files = parse_import_result(result)
+    imported_count, failed_count, failed_files, skipped_count = parse_import_result(result)
     
     # Step 3: Verify imported files
     verification_results = None
@@ -395,7 +489,7 @@ Examples:
                 verification_results = [r.strip().strip('"') for r in verify_output.split(',') if r.strip()]
     
     # Step 4: Print report
-    print_report(file_names, imported_count, failed_count, failed_files, verification_results)
+    print_report(file_names, imported_count, failed_count, failed_files, verification_results, skipped_count)
 
 
 if __name__ == "__main__":
