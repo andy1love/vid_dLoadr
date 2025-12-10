@@ -1,0 +1,48 @@
+{
+  "defaults": {
+    "duration_min": 180,
+    "duration_max": 900,
+    "min_views": 5000,
+    "days_back": 7,
+    "max_results_per_query": 10
+  },
+  "queries": [
+    "professional ballet performance",
+    "orchestra concert hall",
+    "cultural dance performance",
+    "kids music concert live"
+  ],
+  "channels": [],
+  "filters": {
+    "required_keywords": [],
+    "excluded_keywords": [
+      "compilation",
+      "tutorial",
+      "reaction",
+      "behind the scenes",
+      "how to"
+    ],
+    "excluded_channels": []
+  },
+  "quality": {
+    "min_like_ratio": 0.02,
+    "verified_only": false,
+    "min_channel_subscribers": 0
+  },
+  "output": {
+    "report_format": "html",
+    "thumbnail_size": "medium",
+    "sort_by": "views",
+    "output_dir": "./video_reports"
+  },
+  "download_dir_mp4": "~/Library/Mobile Documents/com~apple~CloudDocs/Zen/MP4",
+  "download_dir_mp3": "~/Library/Mobile Documents/com~apple~CloudDocs/Zen/MP3",
+  "crate_output_dir": "/Volumes/256_music/_Serato_/Subcrates",
+  "imac": {
+    "hostname": "192.168.1.XXX",
+    "username": "your_username",
+    "script_path": "/Users/your_username/path/to/scripts",
+    "enabled": true
+  }
+}
+

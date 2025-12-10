@@ -28,6 +28,10 @@ pip-delete-this-directory.txt
 .env.local
 .env.*.local
 
+# Configuration files (may contain sensitive information)
+config.json
+profiles.json
+
 # OS
 .DS_Store
 .DS_Store?

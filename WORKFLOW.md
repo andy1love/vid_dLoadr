@@ -336,5 +336,200 @@ The MP4 download and sync pipeline to Zen iPad is working correctly:
 
 ---
 
+### 🔵 Priority 5: Codebase Organization & Security
+
+**Status**: Planned  
+**Description**: Clean up directory structure and secure sensitive information.
+
+#### Directory Structure Cleanup
+
+**Current Issue:** Too many Python files in root directory (10+ files):
+- `trigger_download.py`
+- `remote_trigger_server.py`
+- `ssh_connection.py`
+- `import_to_music.py`
+- `download_video.py`
+- `crate_maker.py`
+- `create_playlist.py`
+- `import_and_create_playlists.py`
+- `sync_notes_to_urls.py`
+- `clean_up.py`
+
+**Proposed Structure:**
+```
+video_curator_downloader/
+├── src/                    # Main application code
+│   ├── core/              # Core workflow scripts
+│   │   ├── trigger_download.py
+│   │   ├── sync_notes_to_urls.py
+│   │   └── clean_up.py
+│   ├── download/          # Download-related scripts
+│   │   └── download_video.py
+│   ├── music/             # Music import scripts
+│   │   ├── import_to_music.py
+│   │   ├── create_playlist.py
+│   │   └── import_and_create_playlists.py
+│   ├── remote/             # Remote access scripts
+│   │   ├── remote_trigger_server.py
+│   │   └── ssh_connection.py
+│   └── utils/              # Utility scripts
+│       └── crate_maker.py
+├── scripts/                # Shell scripts and commands
+│   ├── Run Trigger Download.command
+│   └── Create Playlists.command
+├── config/                 # Configuration files
+│   ├── config.json.example
+│   └── profiles.json
+├── _workarea/              # Working directories (gitignored)
+├── docs/                   # Documentation
+│   └── WORKFLOW.md
+├── README.md
+└── requirements.txt
+```
+
+**Benefits:**
+- Better organization and maintainability
+- Clear separation of concerns
+- Easier to navigate and understand codebase
+- Follows Python project best practices
+
+#### Security Hardening
+
+**Current Security Issues:**
+
+1. **`config.json` contains sensitive information:**
+   - Local network IP address: `192.168.1.34`
+   - Username: `zen`
+   - Script paths
+   - **Risk**: Currently committed to GitHub (public repository)
+
+2. **SSH credentials exposure:**
+   - IP addresses and usernames visible in code and documentation
+   - Need secure remote SSH access solution
+
+**Security Fixes Needed:**
+
+1. **Add `config.json` to `.gitignore`:**
+   - Prevent committing sensitive configuration
+   - Create `config.json.example` template with placeholder values
+   - Document required configuration in README
+
+2. **Secure SSH Access for Remote Use:**
+   - **Option A: VPN Solution** (Recommended)
+     - Set up VPN server (WireGuard, Tailscale, or macOS Server VPN)
+     - Connect to VPN when away from home network
+     - Use local IP address through VPN tunnel
+     - Most secure, encrypted connection
+   
+   - **Option B: SSH Tunnel/Port Forwarding**
+     - Use SSH jump host or port forwarding
+     - Requires intermediate server (VPS, cloud instance)
+     - More complex setup
+   
+   - **Option C: Tailscale/ZeroTier** (Easiest)
+     - Install Tailscale on both Macs
+     - Creates secure mesh network
+     - Access via Tailscale IP address
+     - No port forwarding or VPN server needed
+     - Free for personal use
+   
+   - **Option D: Dynamic DNS + Port Forwarding** (Less Secure)
+     - Use dynamic DNS service (DuckDNS, No-IP)
+     - Forward SSH port on router
+     - Access via domain name
+     - **Security concerns**: Exposes SSH to internet, use key-only auth
+
+3. **Remove sensitive data from documentation:**
+   - Replace real IPs/usernames with placeholders in examples
+   - Add security notes about not committing real credentials
+
+4. **Environment variables for sensitive data:**
+   - Move SSH password to environment variables (already implemented)
+   - Consider moving IP/username to environment variables too
+   - Document in README
+
+**Recommended Approach:**
+1. ✅ Add `config.json` to `.gitignore` immediately
+2. ✅ Create `config.json.example` template
+3. 🔵 Set up Tailscale for secure remote access (easiest solution)
+4. 🔵 Update documentation with security best practices
+
+#### Git History Security Assessment
+
+**Status:** ⚠️ **Action Required** - Sensitive information found in git history
+
+**Sensitive Information Found:**
+- IP address: `192.168.1.34` (local network IP)
+- Username: `zen`
+- Script path: `/Users/zen/Desktop/vid_dLoadr`
+
+**Where It Appears in Git History:**
+- Commit `7c4e861` (HEAD - already pushed to GitHub)
+- Commit `9595c37` (Update config.json)
+- Commit `f705000` (Update Run Trigger Download.command and config.json)
+- Commit `d236b2c` (Add additional MP3 workflow scripts and update config)
+- Commit `3df3e50` (Initial commit)
+
+**Repository:** `https://github.com/andy1love/vid_dLoadr.git`
+
+**Risk Assessment:**
+
+**Why It's Relatively Safe:**
+1. ✅ `192.168.1.34` is a **private/local IP address**
+   - Not routable from the internet
+   - Only accessible within your local network
+   - Cannot be accessed directly from outside
+2. ✅ Username `zen` is generic
+   - Not a full credential
+   - Still requires password/SSH key to access
+
+**Why It's Still a Concern:**
+1. ⚠️ Publicly visible on GitHub
+2. ⚠️ If someone gains local network access, they know the target IP
+3. ⚠️ Best practice is to avoid exposing any network information
+
+**Recommendations:**
+
+**Option 1: Leave As-Is (Low Risk) - Recommended for Now**
+- ✅ Since it's a local IP, the risk is minimal
+- ✅ Monitor for any suspicious activity
+- ✅ Ensure strong SSH authentication (keys only, no passwords)
+- **Action:** No immediate action required, but document decision
+
+**Option 2: Clean Git History (More Secure)**
+- Remove `config.json` from all commits
+- Rewrite git history using `git filter-branch` or `git filter-repo`
+- Force push to GitHub (⚠️ rewrites history, affects collaborators)
+- **Command:** `git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch config.json' --prune-empty --tag-name-filter cat -- --all`
+- **Action:** Only if maximum security is required
+
+**Option 3: Rotate Credentials (Recommended Long-Term)**
+- Change iMac's local IP if possible (router DHCP reservation)
+- Use different username if desired
+- Set up SSH keys and disable password authentication
+- Update `config.json` with new values (now gitignored)
+- **Action:** Good security practice, but not urgent
+
+**Immediate Actions Already Taken:**
+- ✅ Added `config.json` to `.gitignore` (prevents future commits)
+- ✅ Created `config.json.example` template (safe to commit)
+- ✅ Documentation updated with security notes
+
+**Decision Required:**
+When you next open this project, decide how to proceed:
+1. **Accept current risk** (local IP is relatively safe) - No action needed
+2. **Clean git history** - Use `git filter-branch` or `git filter-repo` to remove sensitive data
+3. **Rotate credentials** - Change IP/username and update config (now gitignored)
+
+**Current Recommendation:** 
+Given that `192.168.1.34` is a local IP, the immediate risk is **low**. Focus on:
+- Strong SSH security (key-based auth, disable passwords)
+- Network security (firewall, VPN if accessing remotely)
+- Monitoring for suspicious access attempts
+
+Cleaning git history is **not critical** but provides maximum security.
+
+---
+
 **Last Updated:** December 2025
 
