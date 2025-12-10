@@ -30,7 +30,6 @@ py/
 ├── sync_notes_to_urls.py   # Syncs URLs from iCloud Notes
 ├── download_video.py        # Downloads videos and creates logs
 ├── trigger_download.py      # Main automation trigger
-├── sync_to_icloud.py        # Syncs downloaded files to iCloud Drive
 ├── clean_up.py             # Verifies downloads and updates Notes
 └── workarea/
     ├── urls/               # URL files (timestamped)
@@ -102,8 +101,7 @@ Main automation script that chains all steps together.
 **Workflow:**
 1. Syncs URLs from iCloud Notes → creates timestamped file
 2. Downloads all videos from the timestamped file
-3. Syncs downloaded files to iCloud Drive (INFUSE folder)
-4. Automatically runs clean up to verify and update Notes
+3. Automatically runs clean up to verify and update Notes
 
 **Usage:**
 ```bash
@@ -112,9 +110,6 @@ python3 trigger_download.py
 
 # Skip sync (use existing URLs)
 python3 trigger_download.py --skip-sync
-
-# Skip iCloud sync
-python3 trigger_download.py --skip-sync-infuse
 
 # Skip clean up
 python3 trigger_download.py --skip-cleanup
@@ -131,45 +126,41 @@ python3 trigger_download.py --file /path/to/urls.txt
 
 **Options:**
 - `--skip-sync` - Skip syncing from Notes
-- `--skip-sync-infuse` - Skip syncing files to iCloud Drive (flag name kept for backward compatibility)
 - `--skip-cleanup` - Skip verification and Note updates
 - `--cleanup-dry-run` - Preview clean up changes
 - `--file <path>` - Use specific URLs file
 - `--output <dir>` - Custom download directory
 - `--cookies <browser>` - Use browser cookies (chrome/firefox/safari/edge)
+- `--skip-import-imac` - Skip importing to Music.app on iMac
+- `--ssh <mode>` - Execution mode for iMac import (local/ssh)
 
-### `sync_to_icloud.py`
-Syncs downloaded MP3 and MP4 files to iCloud Drive.
+### `remote_trigger_server.py`
+HTTP server for triggering downloads remotely from iPhone/iOS Shortcuts.
 
 **Features:**
-- Copies downloaded files to iCloud Drive INFUSE folder
-- Maintains date folder structure (YYYYMMDD)
-- Tracks synced files to avoid duplicates
-- Supports both MP3 and MP4 files
+- Simple HTTP server with REST API
+- Web interface for status monitoring
+- Background job execution
+- Status tracking and output logging
 
 **Usage:**
 ```bash
-# Sync from specific log file
-python3 sync_to_icloud.py log.csv
+# Start server (default port 8080)
+python3 remote_trigger_server.py
 
-# Sync multiple log files
-python3 sync_to_icloud.py log1.csv log2.csv
+# Custom port
+python3 remote_trigger_server.py --port 9000
 
-# Sync all recent logs
-python3 sync_to_icloud.py --all
-
-# Dry run (preview changes)
-python3 sync_to_icloud.py log.csv --dry-run
-
-# Custom download directory
-python3 sync_to_icloud.py log.csv --download-dir /path/to/downloads
+# Custom host
+python3 remote_trigger_server.py --host 192.168.1.100
 ```
 
-**Output:**
-- MP3 files: `~/Library/Mobile Documents/com~apple~CloudDocs/Infuse/MP3/YYYYMMDD/`
-- MP4 files: `~/Library/Mobile Documents/com~apple~CloudDocs/Infuse/MP4/YYYYMMDD/`
+**Endpoints:**
+- `POST /trigger` - Trigger download workflow
+- `GET /status` - Get current status (JSON)
+- `GET /` - Web interface
 
-Note: Files are synced to the INFUSE folder in iCloud Drive, but the script name reflects the general iCloud sync functionality.
+See Roadmap section for detailed iOS Shortcuts setup instructions.
 
 ### `clean_up.py`
 Verifies successful downloads and updates iCloud Notes.
@@ -252,55 +243,131 @@ All paths are relative - you can move the `py` folder anywhere and it will work!
 
 ## Roadmap
 
-### 🔴 Priority 1: Verification with Real URLs
-**Status**: Pending  
+### ✅ Priority 1: Verification with Real URLs
+**Status**: Complete  
 **Description**: Verify that the complete trigger workflow works correctly with real URL inputs from iCloud Notes.
 
-**Tasks**:
-- Test full workflow with actual URLs from iCloud Note
-- Verify all steps execute correctly (sync → download → clean up)
-- Confirm Notes are updated correctly
-- Test edge cases (duplicates, failures, etc.)
+**Completed**:
+- ✅ Full workflow tested with actual URLs from iCloud Note
+- ✅ All steps execute correctly (sync → download → clean up)
+- ✅ Notes are updated correctly
+- ✅ Edge cases handled (duplicates, failures, etc.)
 
 ---
 
 ### 🔵 Priority 2: Remote Trigger from Phone
-**Status**: Planned  
+**Status**: In Progress  
 **Description**: Enable triggering downloads from iPhone and receive notification when all downloads complete.
 
-**Potential Solutions**:
-1. **iOS Shortcuts Integration**
-   - Create Shortcuts automation
-   - Use URL scheme or SSH to trigger script
-   - Send notification via Shortcuts
+**Implementation**: Simple HTTP Server (recommended approach)
+- ✅ HTTP server script created (`remote_trigger_server.py`)
+- ✅ POST endpoint to trigger downloads
+- ✅ Status endpoint to check download progress
+- ⏳ iOS Shortcuts integration (documentation needed)
+- ⏳ Push notification support (optional enhancement)
 
-2. **Push Notification Service**
-   - Integrate with Pushover, IFTTT, or similar
-   - Script sends notification when complete
-   - Can trigger from phone via API
+**Usage**:
 
-3. **Email-based Trigger**
-   - Send email to trigger downloads
-   - Script monitors email inbox
-   - Reply with status when complete
+1. **Start the HTTP server on your Mac:**
+   ```bash
+   python3 remote_trigger_server.py
+   # Or on a custom port:
+   python3 remote_trigger_server.py --port 9000
+   ```
 
-4. **Home Assistant Integration**
-   - Use Home Assistant automation
-   - HTTP endpoint to trigger script
-   - Push notification via HA app
+2. **Find your Mac's IP address:**
+   ```bash
+   ifconfig | grep "inet " | grep -v 127.0.0.1
+   # Or in System Preferences > Network
+   ```
 
-5. **Simple HTTP Server**
-   - Run small HTTP server on Mac
-   - Phone sends POST request to trigger
-   - Server responds with status
-   - Could use ngrok for external access
+3. **Trigger from iPhone/iOS Shortcuts:**
+   - Create a Shortcut with "Get Contents of URL" action
+   - Method: POST
+   - URL: `http://<your-mac-ip>:8080/trigger`
+   - Add to Home Screen or Control Center for quick access
 
-6. **iCloud Reminders/Calendar**
-   - Use Reminders app as trigger mechanism
-   - Script monitors Reminders
-   - Mark as complete when done
+4. **Check status:**
+   - Visit `http://<your-mac-ip>:8080/` in a browser for web interface
+   - Or GET `http://<your-mac-ip>:8080/status` for JSON status
 
-**Recommended Approach**: Start with iOS Shortcuts + HTTP endpoint or email-based trigger for simplicity.
+**API Endpoints:**
+- `POST /trigger` - Start download workflow
+- `GET /status` - Get current download status (JSON)
+- `GET /` - Web interface with status and trigger button
+
+**Query Parameters** (for POST /trigger):
+- `?skip_sync=true` - Skip syncing from Notes
+- `?skip_cleanup=true` - Skip cleanup step
+- `?skip_import_imac=true` - Skip iMac import
+- `?cookies=chrome` - Use browser cookies
+- `?ssh_mode=local` - Run iMac import locally
+
+**Example iOS Shortcuts Setup:**
+1. Open Shortcuts app
+2. Create new shortcut
+3. Add "Get Contents of URL" action
+4. Set URL to: `http://<your-mac-ip>:8080/trigger`
+5. Set Method to: POST
+6. Add "Show Notification" action to confirm trigger
+7. Add to Home Screen or Control Center
+
+**Alternative Solutions** (for future consideration):
+- Push Notification Service (Pushover, IFTTT)
+- Email-based Trigger
+- Home Assistant Integration
+- iCloud Reminders/Calendar
+
+---
+
+### 🔴 Priority 3: Fix SSH Login to iMac
+**Status**: Blocked  
+**Description**: Fix SSH connection issues preventing MP3 import to Music.app on iMac.
+
+**Issues:**
+- SSH prompts for password (SSH keys not configured)
+- Script path incorrect on iMac: `/Users/zen/Desktop/vid_dLoadr/import_and_create_playlists.py` doesn't exist
+- Need to verify correct path and set up passwordless SSH or password handling
+
+**Next Steps:**
+1. Verify correct script path on iMac
+2. Update `config.json` with correct `script_path`
+3. Set up SSH keys OR configure password handling
+4. Test SSH connection
+
+---
+
+### ✅ MP4 Sync Pipeline
+**Status**: ✅ **Satisfactory**  
+**Description**: MP4 download and sync to Zen iPad via iCloud Drive.
+
+**Current Status:**
+- ✅ MP4 files download successfully
+- ✅ Files sync to iPad via iCloud Drive
+- ✅ Workflow is stable and reliable
+
+---
+
+### 🔵 Priority 4: MP4 Hardlink Optimization
+**Status**: Planned  
+**Description**: Optimize iCloud storage usage by using hardlinks instead of duplicating MP4 files.
+
+**Current Workflow:**
+- Files download to "postoffice" directory (package# naming)
+- Postoffice syncs to iPad via iCloud Drive
+
+**Proposed Workflow:**
+- Files download to "postoffice" directory (staging area, not synced to iPad)
+- Create hardlinks from postoffice to Infuse library
+- Only Infuse library syncs to iPad
+- **Benefit**: Files stored once, saves iCloud storage space (currently 250GB limit)
+
+**Implementation:**
+- Use `os.link()` or `ln` command for hardlinks
+- Modify download script to create hardlinks after download
+- Update iCloud Drive sync settings to exclude postoffice directory
+
+---
 
 ## Troubleshooting
 
@@ -338,5 +405,5 @@ See [LICENSE](LICENSE) file for details.
 
 ---
 
-**Last Updated**: November 2025
+**Last Updated**: December 2025
 

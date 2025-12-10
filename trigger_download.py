@@ -9,6 +9,7 @@ import sys
 import os
 import glob
 import json
+import ssh_connection
 
 def load_config():
     """Load configuration from config.json
@@ -92,70 +93,44 @@ def run_sync_notes():
         print(f"❌ Error running sync script: {e}")
         return False
 
-def find_latest_timestamped_file(urls_dir):
-    """Find the most recent timestamped URLs file"""
+def find_latest_timestamped_file(urls_dir, file_type='', max_age_minutes=60):
+    """Find the most recent timestamped URLs file
+    file_type: 'mp3', 'mp4', or '' for any
+    max_age_minutes: Only return files newer than this (default: 60 minutes)
+    Returns: file path or None"""
+    import time
+    
     pattern = os.path.join(urls_dir, '*_*_urls.txt')
     files = glob.glob(pattern)
     
     if not files:
         return None
     
+    # Filter by file type if specified
+    if file_type:
+        files = [f for f in files if f'_{file_type}_urls.txt' in os.path.basename(f)]
+    
+    if not files:
+        return None
+    
     # Sort by modification time, most recent first
     files.sort(key=os.path.getmtime, reverse=True)
+    
+    # Check if the most recent file is within the age limit
+    if max_age_minutes > 0:
+        most_recent = files[0]
+        file_age_minutes = (time.time() - os.path.getmtime(most_recent)) / 60
+        
+        if file_age_minutes > max_age_minutes:
+            # File is too old, don't use it
+            return None
+    
     return files[0]
 
-def run_sync_to_icloud(log_files, download_dir, dry_run=False):
-    """Run sync_to_icloud.py to copy files to iCloud Drive
-    Returns: success status"""
-    print("\n" + "=" * 60)
-    print("   STEP 2.5: SYNC TO iCLOUD DRIVE")
-    print("=" * 60)
-    print()
-    
-    script_path = os.path.join(os.path.dirname(__file__), 'sync_to_icloud.py')
-    
-    if not log_files:
-        print("⏭️  No log files to sync")
-        return True
-    
-    # Filter to only existing log files
-    existing_logs = [f for f in log_files if f and os.path.exists(f)]
-    if not existing_logs:
-        print("⏭️  No valid log files found for syncing")
-        return True
-    
-    try:
-        # Build command - process all log files
-        cmd = [sys.executable, script_path]
-        
-        # Add all log files as positional arguments (sync_to_icloud.py accepts multiple)
-        cmd.extend(existing_logs)
-        
-        if download_dir:
-            cmd.extend(['--download-dir', download_dir])
-        
-        if dry_run:
-            cmd.append('--dry-run')
-        
-        result = subprocess.run(
-            cmd,
-            check=False,
-            capture_output=False,
-            text=True
-        )
-        
-        return result.returncode == 0
-        
-    except FileNotFoundError:
-        print(f"❌ Error: Could not find sync_to_icloud.py at {script_path}")
-        return False
-    except Exception as e:
-        print(f"❌ Error running sync script: {e}")
-        return False
-
-def run_import_on_imac(log_files, dry_run=False):
-    """Run import_and_create_playlists.py on iMac via SSH
-    Returns: success status"""
+def run_import_on_imac(log_files, dry_run=False, ssh_mode='ssh'):
+    """Run import_and_create_playlists.py on iMac via SSH or locally
+    ssh_mode: 'ssh' to run via SSH, 'local' to run locally
+    Returns: success status (True/False) or None if skipped"""
     print("\n" + "=" * 60)
     print("   STEP 2.6: IMPORT TO MUSIC ON iMAC")
     print("=" * 60)
@@ -166,68 +141,94 @@ def run_import_on_imac(log_files, dry_run=False):
     
     if not imac_config.get('enabled', False):
         print("⏭️  iMac import is disabled in config.json")
-        return True
-    
-    hostname = imac_config.get('hostname', '')
-    username = imac_config.get('username', '')
-    script_path = imac_config.get('script_path', '')
-    
-    if not hostname or not username or not script_path:
-        print("⚠️  iMac configuration incomplete. Please check config.json")
-        return False
+        return None
     
     # Check if we have any MP3 log files
     mp3_logs = [f for f in log_files if f and os.path.exists(f) and 'mp3' in os.path.basename(f).lower()]
     
     if not mp3_logs:
         print("⏭️  No MP3 log files found - skipping iMac import")
-        return True
+        return None
     
     print(f"   Found {len(mp3_logs)} MP3 log file(s)")
     
-    # Build SSH command
-    # SSH to iMac and run import_and_create_playlists.py with --all-date-folders
-    # This will process all date folders found in the base MP3 directory
-    remote_script = os.path.join(script_path, 'import_and_create_playlists.py')
+    if ssh_mode == 'local':
+        # Run locally
+        script_path = os.path.join(os.path.dirname(__file__), 'import_and_create_playlists.py')
+        
+        if not os.path.exists(script_path):
+            print(f"❌ Error: Could not find import_and_create_playlists.py at {script_path}")
+            return False
+        
+        # Build local command
+        cmd = [sys.executable, script_path, '--all-date-folders']
+        
+        if dry_run:
+            cmd.append('--dry-run')
+        
+        print(f"\n💻 Running locally...")
+        print(f"   Running: {script_path}")
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                check=False,
+                capture_output=False,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                print("\n✅ Local import completed successfully!")
+                return True
+            else:
+                print(f"\n⚠️  Local import completed with exit code {result.returncode}")
+                return False
+                
+        except FileNotFoundError:
+            print(f"\n❌ Error: Could not find import_and_create_playlists.py at {script_path}")
+            return False
+        except Exception as e:
+            print(f"\n❌ Error running local import command: {e}")
+            return False
     
-    # Use --all-date-folders to process all folders in the base directory
-    ssh_cmd = [
-        'ssh',
-        f'{username}@{hostname}',
-        f'cd {script_path} && python3 {remote_script} --all-date-folders'
-    ]
-    
-    if dry_run:
-        ssh_cmd.append('--dry-run')
-    
-    print(f"\n📡 Connecting to iMac ({hostname})...")
-    print(f"   Running: {remote_script}")
-    
-    try:
-        result = subprocess.run(
-            ssh_cmd,
-            check=False,
-            capture_output=False,
-            text=True,
-            timeout=600  # 10 minute timeout
+    else:
+        # Run via SSH (default)
+        hostname, username, script_path = ssh_connection.get_ssh_config()
+        
+        if not hostname or not username or not script_path:
+            print("⚠️  iMac configuration incomplete. Please check config.json")
+            return False
+        
+        # Build the remote command
+        remote_script = os.path.join(script_path, 'import_and_create_playlists.py')
+        remote_cmd = f'cd {script_path} && python3 {remote_script} --all-date-folders'
+        if dry_run:
+            remote_cmd += ' --dry-run'
+        
+        print(f"\n📡 Connecting to iMac ({hostname})...")
+        print(f"   Running: {remote_script}")
+        
+        # Use SSH password from environment variable if available, otherwise use SSH keys
+        password = os.environ.get('SSH_PASSWORD', '')
+        
+        # Execute remote command using ssh_connection module
+        success, exit_code, error = ssh_connection.execute_remote_command(
+            hostname=hostname,
+            username=username,
+            remote_cmd=remote_cmd,
+            password=password if password else None,
+            timeout=600
         )
         
-        if result.returncode == 0:
+        if success:
             print("\n✅ iMac import completed successfully!")
             return True
         else:
-            print(f"\n⚠️  iMac import completed with exit code {result.returncode}")
+            if error:
+                print(f"\n⚠️  iMac import error: {error}")
+            else:
+                print(f"\n⚠️  iMac import completed with exit code {exit_code}")
             return False
-            
-    except subprocess.TimeoutExpired:
-        print("\n❌ SSH command timed out (iMac may be unreachable)")
-        return False
-    except FileNotFoundError:
-        print("\n❌ Error: SSH command not found. Is SSH installed?")
-        return False
-    except Exception as e:
-        print(f"\n❌ Error running SSH command: {e}")
-        return False
 
 def run_clean_up(log_file, download_dir, note_title="Download_URLs", dry_run=False):
     """Run clean_up.py to verify downloads and update iCloud Notes"""
@@ -291,20 +292,21 @@ def run_download_videos(urls_file=None, use_cookies=None, cookies_browser=None, 
     
     if not urls_file:
         # Try to find the latest timestamped file in urls/ directory
+        # Only use files from current session (within last 60 minutes)
         workarea_dir = os.path.join(os.path.dirname(__file__), '_workarea')
         urls_dir = os.path.join(workarea_dir, 'urls')
-        latest_file = find_latest_timestamped_file(urls_dir)
+        
+        file_type = 'mp3' if download_type == 'audio' else 'mp4'
+        latest_file = find_latest_timestamped_file(urls_dir, file_type=file_type, max_age_minutes=60)
         
         if latest_file:
             print(f"📄 Using latest timestamped file: {os.path.basename(latest_file)}")
             cmd.extend(['--file', latest_file])
             urls_file = latest_file  # Store for log file generation
         else:
-            # Fallback to default
-            default_file = os.path.join(urls_dir, 'urls.txt')
-            print(f"📄 Using default file: {os.path.basename(default_file)}")
-            cmd.extend(['--file', default_file])
-            urls_file = default_file
+            # No recent file found - skip download for this type
+            print(f"⏭️  No recent {file_type.upper()} URLs file found - skipping {download_type_name} download")
+            return True, None  # Return success but no log file
     
     # Add download type
     cmd.extend(['--type', download_type])
@@ -351,7 +353,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python trigger_download.py                    # Full workflow (default settings)
+  python trigger_download.py                    # Full workflow (default settings, SSH mode)
+  python trigger_download.py --ssh local        # Run iMac import locally instead of SSH
   python trigger_download.py --skip-sync        # Skip sync, just download
   python trigger_download.py --cookies chrome   # Use Chrome cookies for downloads
   python trigger_download.py --file custom.txt  # Use custom URLs file
@@ -386,7 +389,7 @@ Examples:
     parser.add_argument(
         '--skip-sync-infuse',
         action='store_true',
-        help='Skip syncing files to iCloud Drive'
+        help='Skip syncing files to iCloud Drive (deprecated - no longer used)'
     )
     
     parser.add_argument(
@@ -405,6 +408,14 @@ Examples:
         '--skip-import-imac',
         action='store_true',
         help='Skip importing to Music.app on iMac'
+    )
+    
+    parser.add_argument(
+        '--ssh',
+        type=str,
+        choices=['local', 'ssh'],
+        default='ssh',
+        help='Execution mode for iMac import: "local" to run locally, "ssh" to run via SSH (default: ssh)'
     )
     
     args = parser.parse_args()
@@ -454,8 +465,8 @@ Examples:
         if not mp3_success:
             download_success = False
     
-    # Download MP4s if we have MP4 URLs
-    if synced_files.get('mp4') or (args.file and 'mp4' in os.path.basename(args.file).lower()) or not synced_files.get('mp3'):
+    # Download MP4s if we have MP4 URLs (only if actually synced, not just because MP3s exist)
+    if synced_files.get('mp4') or (args.file and 'mp4' in os.path.basename(args.file).lower()):
         mp4_file = synced_files.get('mp4') or args.file
         mp4_success, mp4_log = run_download_videos(
             urls_file=mp4_file,
@@ -469,36 +480,18 @@ Examples:
         if not mp4_success:
             download_success = False
     
-    # Step 2.5: Sync to iCloud Drive
-    sync_infuse_success = None
-    if not args.skip_sync_infuse and download_success and log_files:
-        # Note: sync_to_icloud.py will determine the correct directory per log file
-        # based on file type (MP3 vs MP4), so we don't need to specify it here
-        # If --output is provided, it will override the config for all files
-        default_download_dir = None  # Let sync_to_icloud.py use config per file type
-        
-        sync_infuse_success = run_sync_to_icloud(
-            log_files=log_files,
-            download_dir=args.output,  # Only use if provided, otherwise None
-            dry_run=False  # Always run for real (not dry-run)
-        )
-    elif args.skip_sync_infuse:
-        print("\n⏭️  Skipping iCloud sync step (--skip-sync-infuse flag used)")
-    elif not log_files or not any(os.path.exists(f) for f in log_files if f):
-        print(f"\n⚠️  Log files not found")
-        print("   Skipping iCloud sync step")
-    
-    # Step 2.6: Import to Music.app on iMac (via SSH)
+    # Step 2.5: Import to Music.app on iMac (via SSH or locally)
     imac_import_success = None
-    if not args.skip_import_imac and sync_infuse_success and log_files:
+    if not args.skip_import_imac and download_success and log_files:
         imac_import_success = run_import_on_imac(
             log_files=log_files,
-            dry_run=False
+            dry_run=False,
+            ssh_mode=args.ssh
         )
     elif args.skip_import_imac:
         print("\n⏭️  Skipping iMac import step (--skip-import-imac flag used)")
-    elif not sync_infuse_success:
-        print("\n⏭️  Skipping iMac import step (iCloud sync not completed)")
+    elif not download_success:
+        print("\n⏭️  Skipping iMac import step (downloads not completed)")
     elif not log_files or not any(os.path.exists(f) for f in log_files if f):
         print("\n⏭️  Skipping iMac import step (no log files)")
     
@@ -545,14 +538,6 @@ Examples:
             print("   • MP4 downloads: Completed")
     else:
         print("❌ Download: Failed or had errors")
-    
-    if sync_infuse_success is not None:
-        if sync_infuse_success:
-            print("✅ iCloud Sync: Completed")
-        else:
-            print("⚠️  iCloud Sync: Completed with warnings")
-    elif not args.skip_sync_infuse:
-        print("⏭️  iCloud Sync: Skipped (no log files)")
     
     if imac_import_success is not None:
         if imac_import_success:
