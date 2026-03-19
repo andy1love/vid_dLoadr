@@ -43,13 +43,21 @@ video_curator_downloader/
 ├── server/                 # HTTP remote trigger server
 │   └── remote_trigger_server.py
 ├── docs/
-│   └── WORKFLOW.md
+│   ├── WORKFLOW.md
+│   ├── how_to_install.md
+│   └── push_log.md
 ├── _workarea/
 │   ├── urls/               # URL files (timestamped)
 │   │   ├── urls.txt
 │   │   └── YYYYMMDD_HHMM_<count>_urls.txt
-│   └── logs/               # CSV download logs
-│       └── YYYYMMDD_HHMM_<count>_urls_log.csv
+│   ├── logs/               # CSV download logs
+│   │   └── YYYYMMDD_HHMM_<count>_urls_log.csv
+│   ├── mds/                # Metadata files
+│   └── sync_tracking.json
+├── _logs/                  # Push/automation logs
+├── git_pull.command        # Git pull helper
+├── git_push.command        # Git push helper
+├── install.command         # Setup/install helper
 ├── config.json
 ├── config.json.example
 ├── profiles.json
@@ -239,8 +247,8 @@ python3 download/clean_up.py log.csv --download-dir /path --note "MyNote"
 
 ### Default Paths
 - **Downloads**: `~/Downloads/Videos/` (relative to user home directory)
-- **URLs**: `workarea/urls/` (relative to script directory)
-- **Logs**: `workarea/logs/` (relative to script directory)
+- **URLs**: `_workarea/urls/` (relative to script directory)
+- **Logs**: `_workarea/logs/` (relative to script directory)
 
 All paths are relative - you can move the `py` folder anywhere and it will work!
 
@@ -339,19 +347,18 @@ All paths are relative - you can move the `py` folder anywhere and it will work!
 ---
 
 ### 🔴 Priority 3: Fix SSH Login to iMac
-**Status**: Blocked  
+**Status**: In Progress
 **Description**: Fix SSH connection issues preventing MP3 import to Music.app on iMac.
 
 **Issues:**
 - SSH prompts for password (SSH keys not configured)
-- Script path incorrect on iMac: `/Users/zen/Desktop/vid_dLoadr/import_and_create_playlists.py` doesn't exist
-- Need to verify correct path and set up passwordless SSH or password handling
+- Script path on iMac needs to be verified and set in `config.json`
 
 **Next Steps:**
 1. Verify correct script path on iMac
 2. Update `config.json` with correct `script_path`
-3. Set up SSH keys OR configure password handling
-4. Test SSH connection
+3. Set up SSH keys for passwordless auth
+4. Test SSH connection end-to-end
 
 ---
 
@@ -558,5 +565,5 @@ See [LICENSE](LICENSE) file for details.
 
 ---
 
-**Last Updated**: December 2025
+**Last Updated**: March 2026
 
