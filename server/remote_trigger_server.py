@@ -39,7 +39,7 @@ def run_trigger_download(args_dict=None):
     download_status['success'] = None
     download_status['output'] = []
     
-    script_path = os.path.join(os.path.dirname(__file__), 'trigger_download.py')
+    script_path = os.path.join(os.path.dirname(__file__), '..', 'download', 'trigger_download.py')
     
     # Build command
     cmd = [sys.executable, script_path]
@@ -49,12 +49,8 @@ def run_trigger_download(args_dict=None):
             cmd.append('--skip-sync')
         if args_dict.get('skip_cleanup'):
             cmd.append('--skip-cleanup')
-        if args_dict.get('skip_import_imac'):
-            cmd.append('--skip-import-imac')
         if args_dict.get('cookies'):
             cmd.extend(['--cookies', args_dict['cookies']])
-        if args_dict.get('ssh_mode'):
-            cmd.extend(['--ssh', args_dict['ssh_mode']])
     
     try:
         result = subprocess.run(
@@ -173,12 +169,8 @@ class TriggerHandler(BaseHTTPRequestHandler):
                 args_dict['skip_sync'] = True
             if 'skip_cleanup' in query_params:
                 args_dict['skip_cleanup'] = True
-            if 'skip_import_imac' in query_params:
-                args_dict['skip_import_imac'] = True
             if 'cookies' in query_params:
                 args_dict['cookies'] = query_params['cookies'][0]
-            if 'ssh_mode' in query_params:
-                args_dict['ssh_mode'] = query_params['ssh_mode'][0]
             
             # Run in background thread
             def run_in_background():

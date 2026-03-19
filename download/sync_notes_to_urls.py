@@ -96,7 +96,7 @@ def extract_urls_by_marker(text_or_html):
     
     url_pattern = r'https?://[^\s<>"\']+'
     
-    for line in lines:
+    for line_num, line in enumerate(lines):
         line = line.strip()
         if not line:
             continue
@@ -220,7 +220,7 @@ def main():
     NOTE_TITLE = "Download_URLs"  # Change this to match your note title
     # Use relative path from script location
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    WORKAREA_DIR = os.path.join(SCRIPT_DIR, "_workarea")
+    WORKAREA_DIR = os.path.join(SCRIPT_DIR, "..", "_workarea")
     URLS_DIR = os.path.join(WORKAREA_DIR, "urls")
     URLS_FILE = os.path.join(URLS_DIR, "urls.txt")
     
@@ -279,9 +279,11 @@ def main():
             timestamped_files['mp3'] = mp3_file
             print(f"\n📄 Created MP3 timestamped file: {mp3_filename}")
             print(f"OUTPUT_FILE_MP3:{mp3_file}")
-    
-    if mp4_urls:
-        mp4_file, mp4_filename = create_timestamped_file(set(mp4_urls), URLS_DIR, 'mp4')
+
+    # Exclude any URLs already in the MP3 list — they are audio-only downloads
+    mp4_only_urls = [url for url in mp4_urls if url not in mp3_urls]
+    if mp4_only_urls:
+        mp4_file, mp4_filename = create_timestamped_file(set(mp4_only_urls), URLS_DIR, 'mp4')
         if mp4_file:
             timestamped_files['mp4'] = mp4_file
             print(f"\n📄 Created MP4 timestamped file: {mp4_filename}")
@@ -306,7 +308,7 @@ def main():
         print(f"⏭️  Skipped: {len(skipped_urls)} duplicate(s)")
     print(f"📊 Total URLs in Note: {len(all_urls)}")
     print(f"   • MP3 URLs: {len(mp3_urls)}")
-    print(f"   • MP4 URLs: {len(mp4_urls)}")
+    print(f"   • MP4 URLs: {len(mp4_only_urls)} ({len(mp4_urls) - len(mp4_only_urls)} skipped - already in MP3 list)")
     print(f"📊 Total URLs in history file: {len(existing_urls)}")
     
     if timestamped_files:

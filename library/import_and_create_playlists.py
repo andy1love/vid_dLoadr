@@ -17,7 +17,7 @@ def load_config():
     """Load configuration from config.json
     Returns: dict with config values, or empty dict if file not found"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, 'config.json')
+    config_path = os.path.join(script_dir, '..', 'config.json')
     
     if os.path.exists(config_path):
         try:

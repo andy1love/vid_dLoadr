@@ -26,17 +26,35 @@ clean_up.py → Verifies downloads + updates Notes
 ## Files Structure
 
 ```
-py/
-├── sync_notes_to_urls.py   # Syncs URLs from iCloud Notes
-├── download_video.py        # Downloads videos and creates logs
-├── trigger_download.py      # Main automation trigger
-├── clean_up.py             # Verifies downloads and updates Notes
-└── workarea/
-    ├── urls/               # URL files (timestamped)
-    │   ├── urls.txt
-    │   └── YYYYMMDD_HHMM_<count>_urls.txt
-    └── logs/               # CSV download logs
-        └── YYYYMMDD_HHMM_<count>_urls_log.csv
+video_curator_downloader/
+├── download/               # Download workflow scripts
+│   ├── sync_notes_to_urls.py
+│   ├── download_video.py
+│   ├── trigger_download.py
+│   ├── clean_up.py
+│   └── Run Trigger Download.command
+├── library/                # Music.app import + Serato playlists
+│   ├── import_to_music.py
+│   ├── import_and_create_playlists.py
+│   ├── create_playlist.py
+│   ├── debug_playlists.py
+│   ├── Create Playlists.applescript
+│   └── Create Playlists.command
+├── server/                 # HTTP remote trigger server
+│   └── remote_trigger_server.py
+├── docs/
+│   └── WORKFLOW.md
+├── _workarea/
+│   ├── urls/               # URL files (timestamped)
+│   │   ├── urls.txt
+│   │   └── YYYYMMDD_HHMM_<count>_urls.txt
+│   └── logs/               # CSV download logs
+│       └── YYYYMMDD_HHMM_<count>_urls_log.csv
+├── config.json
+├── config.json.example
+├── profiles.json
+├── requirements.txt
+└── LICENSE
 ```
 
 ## Scripts
@@ -52,7 +70,7 @@ Syncs URLs from an iCloud Note to local files.
 
 **Usage:**
 ```bash
-python3 sync_notes_to_urls.py
+python3 download/sync_notes_to_urls.py
 ```
 
 **Configuration:**
@@ -72,13 +90,13 @@ Downloads videos from URL files using yt-dlp.
 **Usage:**
 ```bash
 # From file
-python3 download_video.py --file workarea/urls/urls.txt
+python3 download/download_video.py --file _workarea/urls/urls.txt
 
 # Interactive mode
-python3 download_video.py
+python3 download/download_video.py
 
 # With cookies (helps avoid 403 errors)
-python3 download_video.py --file urls.txt --cookies chrome
+python3 download/download_video.py --file _workarea/urls/urls.txt --cookies chrome
 ```
 
 **CSV Log Format:**
@@ -106,22 +124,22 @@ Main automation script that chains all steps together.
 **Usage:**
 ```bash
 # Full workflow
-python3 trigger_download.py
+python3 download/trigger_download.py
 
 # Skip sync (use existing URLs)
-python3 trigger_download.py --skip-sync
+python3 download/trigger_download.py --skip-sync
 
 # Skip clean up
-python3 trigger_download.py --skip-cleanup
+python3 download/trigger_download.py --skip-cleanup
 
 # Preview clean up changes
-python3 trigger_download.py --cleanup-dry-run
+python3 download/trigger_download.py --cleanup-dry-run
 
 # Use Chrome cookies
-python3 trigger_download.py --cookies chrome
+python3 download/trigger_download.py --cookies chrome
 
 # Custom URLs file
-python3 trigger_download.py --file /path/to/urls.txt
+python3 download/trigger_download.py --file /path/to/urls.txt
 ```
 
 **Options:**
@@ -146,13 +164,13 @@ HTTP server for triggering downloads remotely from iPhone/iOS Shortcuts.
 **Usage:**
 ```bash
 # Start server (default port 8080)
-python3 remote_trigger_server.py
+python3 server/remote_trigger_server.py
 
 # Custom port
-python3 remote_trigger_server.py --port 9000
+python3 server/remote_trigger_server.py --port 9000
 
 # Custom host
-python3 remote_trigger_server.py --host 192.168.1.100
+python3 server/remote_trigger_server.py --host 192.168.1.100
 ```
 
 **Endpoints:**
@@ -174,16 +192,16 @@ Verifies successful downloads and updates iCloud Notes.
 **Usage:**
 ```bash
 # Interactive mode (prompts for file)
-python3 clean_up.py
+python3 download/clean_up.py
 
 # Command line
-python3 clean_up.py log.csv
+python3 download/clean_up.py log.csv
 
 # Dry run (preview changes)
-python3 clean_up.py log.csv --dry-run
+python3 download/clean_up.py log.csv --dry-run
 
 # Custom settings
-python3 clean_up.py log.csv --download-dir /path --note "MyNote"
+python3 download/clean_up.py log.csv --download-dir /path --note "MyNote"
 ```
 
 **What it does:**
@@ -230,7 +248,7 @@ All paths are relative - you can move the `py` folder anywhere and it will work!
 
 ### Basic Usage
 1. **On iPhone**: Add URLs to "Download_URLs" note in Notes app
-2. **On Mac**: Run `python3 trigger_download.py`
+2. **On Mac**: Run `python3 download/trigger_download.py`
 3. **Result**:
    - URLs synced to timestamped file
    - Videos downloaded to dated folder
@@ -260,7 +278,7 @@ All paths are relative - you can move the `py` folder anywhere and it will work!
 **Description**: Enable triggering downloads from iPhone and receive notification when all downloads complete.
 
 **Implementation**: Simple HTTP Server (recommended approach)
-- ✅ HTTP server script created (`remote_trigger_server.py`)
+- ✅ HTTP server script created (`server/remote_trigger_server.py`)
 - ✅ POST endpoint to trigger downloads
 - ✅ Status endpoint to check download progress
 - ⏳ iOS Shortcuts integration (documentation needed)
@@ -375,27 +393,7 @@ All paths are relative - you can move the `py` folder anywhere and it will work!
 
 #### Directory Structure Cleanup
 
-**Current Issue:** Too many Python files in root directory (10+ files)
-
-**Proposed Structure:**
-```
-video_curator_downloader/
-├── src/                    # Main application code
-│   ├── core/              # Core workflow scripts
-│   ├── download/          # Download-related scripts
-│   ├── music/             # Music import scripts
-│   ├── remote/             # Remote access scripts
-│   └── utils/              # Utility scripts
-├── scripts/                # Shell scripts and commands
-├── config/                 # Configuration files
-├── docs/                   # Documentation
-└── requirements.txt
-```
-
-**Benefits:**
-- Better organization and maintainability
-- Clear separation of concerns
-- Easier to navigate and understand codebase
+**Status:** ✅ Complete — scripts reorganized into `download/`, `library/`, and `server/` subdirectories.
 
 #### Security Hardening
 

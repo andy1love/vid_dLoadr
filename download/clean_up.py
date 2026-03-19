@@ -14,14 +14,15 @@ import subprocess
 import glob
 import json
 from datetime import datetime
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 from html.parser import HTMLParser
+from html import unescape
 
 def load_config():
     """Load configuration from config.json
     Returns: dict with config values, or empty dict if file not found"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, 'config.json')
+    config_path = os.path.join(script_dir, '..', 'config.json')
     
     if os.path.exists(config_path):
         try:
@@ -184,6 +185,8 @@ def extract_video_id(url):
             elif 'watch' in parsed.path:
                 params = parse_qs(parsed.query)
                 return params.get('v', [None])[0]
+            elif 'shorts/' in parsed.path:
+                return parsed.path.split('shorts/')[1].split('/')[0].split('?')[0]
         
         elif 'instagram.com' in parsed.netloc:
             # Instagram URLs: extract shortcode
@@ -332,6 +335,15 @@ def update_note_with_changes(note_title, successful_urls, failed_urls, file_type
     marker = "___mp3___" if file_type == 'audio' else "___mp4___"
     file_type_name = "MP3" if file_type == 'audio' else "MP4"
     
+    # Build a set of video IDs to remove (most reliable matching)
+    video_ids_to_remove = set()
+    urls_to_remove_set = set()
+    for url in successful_urls:
+        urls_to_remove_set.add(url)
+        vid_id = extract_video_id(url)
+        if vid_id:
+            video_ids_to_remove.add(vid_id)
+    
     # Remove successful URLs, but be smart about which section they're in
     print(f"\n🗑️  Removing {len(successful_urls)} successful {file_type_name} URL(s)...")
     
@@ -353,21 +365,59 @@ def update_note_with_changes(note_title, successful_urls, failed_urls, file_type
             new_lines.append(line)
             continue
         
+        # Decode HTML entities to find URLs
+        decoded_line = unescape(line)
+        line_urls = re.findall(url_pattern, decoded_line)
+        
         # Check if this line contains a URL we need to remove
         should_remove = False
-        for url in successful_urls:
-            if url in line:
+        matched_video_id = None
+        
+        # Check each URL in the line
+        for line_url in line_urls:
+            line_video_id = extract_video_id(line_url)
+
+            # Check if this video ID should be removed
+            if line_video_id and line_video_id in video_ids_to_remove:
                 # Only remove if it's in the correct section
                 if (file_type == 'audio' and current_section == 'mp3') or \
                    (file_type == 'video' and (current_section == 'mp4' or current_section is None)):
                     should_remove = True
+                    matched_video_id = line_video_id
                     break
         
         if should_remove:
-            # Remove the URL from the line
+            # Remove the entire line if it only contains the URL (common case: <div>URL</div>)
+            # Check if line is just a div with the URL
+            line_stripped = line.strip()
+            if line_stripped.startswith('<div>') and line_stripped.endswith('</div>'):
+                # Extract content between div tags
+                div_content = line_stripped[5:-6]  # Remove <div> and </div>
+                # Check if div content is just the URL (with or without HTML encoding)
+                decoded_div_content = unescape(div_content)
+                div_urls = re.findall(url_pattern, decoded_div_content)
+                if div_urls:
+                    # Check if any URL in div matches
+                    for div_url in div_urls:
+                        div_video_id = extract_video_id(div_url)
+                        if div_video_id and div_video_id in video_ids_to_remove:
+                            # Skip this line entirely
+                            skip_next_empty = True
+                            break
+                    if skip_next_empty:
+                        continue
+            
+            # Otherwise, try to remove the URL from the line
             cleaned_line = line
-            for url in successful_urls:
-                cleaned_line = cleaned_line.replace(url, '')
+            for line_url in line_urls:
+                line_video_id = extract_video_id(line_url)
+
+                if line_video_id and line_video_id in video_ids_to_remove:
+                    # Remove both HTML-encoded and decoded versions
+                    html_encoded_url = line_url.replace('&', '&amp;')
+                    cleaned_line = cleaned_line.replace(html_encoded_url, '')
+                    cleaned_line = cleaned_line.replace(line_url, '')
+            
             cleaned_line = cleaned_line.strip()
             
             # Only keep the line if it has other content
@@ -623,7 +673,7 @@ Examples:
         elif '❌ Failed' in status:
             failed_urls.append(url)
             print(f"\n❌ Failed: {title[:40]}...")
-            print(f"   → Will move to FAILED URLS section")
+            print(f"   → Will stay in note for retry")
     
     # Summary
     print("\n" + "=" * 60)
@@ -641,14 +691,14 @@ Examples:
         if failed_urls:
             print(f"   Move {len(failed_urls)} failed URL(s) to FAILED section")
     else:
-        if successful_urls or failed_urls:
-            success = update_note_with_changes(note_title, successful_urls, failed_urls, file_type)
+        if successful_urls:
+            success = update_note_with_changes(note_title, successful_urls, [], file_type)
             if success:
                 print(f"\n✅ Note updated successfully! ({file_type_name} URLs cleaned)")
             else:
                 print("\n❌ Failed to update note")
         else:
-            print("\n💡 No changes needed")
+            print("\n💡 No changes needed (failed URLs left in note for retry)")
 
 if __name__ == "__main__":
     main()
