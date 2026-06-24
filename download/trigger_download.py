@@ -307,7 +307,14 @@ Examples:
     print("   TRIGGER: SYNC & DOWNLOAD AUTOMATION")
     print("=" * 60)
     print()
-    
+
+    # Fall back to cookies_browser from config.json if not passed on CLI
+    if not args.cookies:
+        config = load_config()
+        config_browser = config.get('cookies_browser')
+        if config_browser:
+            args.cookies = config_browser
+
     # Step 1: Sync from Notes (unless skipped)
     synced_files = {}
     if not args.skip_sync:

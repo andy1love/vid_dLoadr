@@ -10,6 +10,7 @@ import sys
 import argparse
 import csv
 import json
+import shutil
 from datetime import datetime
 import subprocess
 
@@ -27,6 +28,14 @@ def load_config():
             print(f"⚠️  Warning: Could not load config.json: {e}")
             return {}
     return {}
+
+def get_tmp_dir(folder_name):
+    """Return a local tmp path for intermediate yt-dlp files.
+    All processing happens here; final files are moved to iCloud afterward."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    tmp_path = os.path.join(script_dir, '..', '_tmp', folder_name)
+    os.makedirs(tmp_path, exist_ok=True)
+    return os.path.normpath(tmp_path)
 
 def get_default_download_dir(download_type='video'):
     """Get default download directory from config.json based on download type
@@ -145,6 +154,7 @@ def get_video_info(url, use_cookies=False, cookies_browser=None):
     command = [
         'yt-dlp',
         '--dump-json',
+        '--no-playlist',
         '--no-check-certificate',
         '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
     ]
@@ -171,53 +181,54 @@ def download_audio(url, download_path, use_cookies=False, cookies_browser=None):
     Returns: (success: bool, title: str, video_id: str, duration: int, error: str)"""
     print(f"\n🎵 Downloading audio (MP3) to: {download_path}")
     print(f"🔗 URL: {url}\n")
-    
+
     # Try to get video info first
     video_info = get_video_info(url, use_cookies, cookies_browser)
     title = video_info.get('title', 'Unknown') if video_info else 'Unknown'
     video_id = video_info.get('id', '') if video_info else ''
     duration = video_info.get('duration', 0) if video_info else 0
-    
-    # yt-dlp command for audio download (best quality audio, convert to MP3)
+
+    # All yt-dlp processing (including intermediate .m4a) happens locally
+    folder_name = os.path.basename(download_path)
+    tmp_path = get_tmp_dir(folder_name)
+
     command = [
         'yt-dlp',
-        # Format selection - best audio available
         '-f', 'bestaudio[ext=m4a]/bestaudio/best',
-        # Extract audio and convert to MP3
         '--extract-audio',
         '--audio-format', 'mp3',
-        '--audio-quality', '256K',  # High quality: 256kbps
-        # Anti-bot measures
+        '--audio-quality', '256K',
+        '--remote-components', 'ejs:github',
         '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
         '--sleep-requests', '1',
         '--sleep-interval', '3',
         '--max-sleep-interval', '6',
-        # Retries
         '--retries', '10',
         '--fragment-retries', '10',
-        # Additional options
         '--no-check-certificate',
         '--prefer-free-formats',
-        # Output template with ID for unique filenames
-        '-o', os.path.join(download_path, '%(title)s_%(id)s.%(ext)s'),
+        '--no-playlist',
+        '-o', os.path.join(tmp_path, '%(title)s_%(id)s.%(ext)s'),
     ]
-    
-    # Add cookies if requested
+
     if use_cookies and cookies_browser:
         command.extend(['--cookies-from-browser', cookies_browser])
         print(f"🍪 Using cookies from {cookies_browser}")
-    
-    # Add URL
+
     command.append(url)
-    
+
     try:
-        # Run yt-dlp with real-time progress output
         print("⏳ Processing audio (this may take a few minutes)...")
         print("   Watch for progress updates below:\n")
-        
-        # Run without capturing output - let yt-dlp print directly
-        result = subprocess.run(command, check=True, timeout=7200)
-        
+
+        subprocess.run(command, check=True, timeout=7200)
+
+        # Move finished file(s) from local tmp to iCloud destination
+        os.makedirs(download_path, exist_ok=True)
+        for fname in os.listdir(tmp_path):
+            if not fname.startswith('.'):
+                shutil.move(os.path.join(tmp_path, fname), os.path.join(download_path, fname))
+
         print("\n✅ Audio download complete!")
         return True, title, video_id, duration, ""
     except subprocess.TimeoutExpired:
@@ -233,56 +244,54 @@ def download_video(url, download_path, use_cookies=False, cookies_browser=None):
     Returns: (success: bool, title: str, video_id: str, duration: int, error: str)"""
     print(f"\n📥 Downloading video to: {download_path}")
     print(f"🔗 URL: {url}\n")
-    
+
     # Try to get video info first
     video_info = get_video_info(url, use_cookies, cookies_browser)
     title = video_info.get('title', 'Unknown') if video_info else 'Unknown'
     video_id = video_info.get('id', '') if video_info else ''
     duration = video_info.get('duration', 0) if video_info else 0
-    
-    # Enhanced yt-dlp command with anti-403 measures
+
+    # All yt-dlp processing (including intermediate streams and ffmpeg merge) happens locally
+    folder_name = os.path.basename(download_path)
+    tmp_path = get_tmp_dir(folder_name)
+
     command = [
         'yt-dlp',
-        # Format selection - try multiple fallbacks
         '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        # Output format
         '--merge-output-format', 'mp4',
         '--recode-video', 'mp4',
-        # Post-processing (highest quality - no preset for maximum quality)
         '--postprocessor-args', 'ffmpeg:-c:v libx264 -c:a aac -movflags +faststart',
-        # Anti-bot measures
+        '--remote-components', 'ejs:github',
         '--user-agent', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
         '--sleep-requests', '1',
         '--sleep-interval', '3',
         '--max-sleep-interval', '6',
-        # Retries
         '--retries', '10',
         '--fragment-retries', '10',
-        # Additional options
         '--no-check-certificate',
         '--prefer-free-formats',
-        # Output template with ID for unique filenames
-        '-o', os.path.join(download_path, '%(title)s_%(id)s.%(ext)s'),
+        '--no-playlist',
+        '-o', os.path.join(tmp_path, '%(title)s_%(id)s.%(ext)s'),
     ]
-    
-    # Add cookies if requested
+
     if use_cookies and cookies_browser:
         command.extend(['--cookies-from-browser', cookies_browser])
         print(f"🍪 Using cookies from {cookies_browser}")
-    
-    # Add URL
+
     command.append(url)
-    
+
     try:
-        # Run yt-dlp with real-time progress output
-        # Add timeout for very long downloads (2 hours max)
         print("⏳ Processing (this may take a few minutes for large files)...")
         print("   Watch for progress updates below:\n")
-        
-        # Run without capturing output - let yt-dlp print directly
-        # This ensures all progress messages are visible in real-time
-        result = subprocess.run(command, check=True, timeout=7200)
-        
+
+        subprocess.run(command, check=True, timeout=7200)
+
+        # Move finished file(s) from local tmp to iCloud destination
+        os.makedirs(download_path, exist_ok=True)
+        for fname in os.listdir(tmp_path):
+            if not fname.startswith('.'):
+                shutil.move(os.path.join(tmp_path, fname), os.path.join(download_path, fname))
+
         print("\n✅ Download complete!")
         return True, title, video_id, duration, ""
     except subprocess.TimeoutExpired:

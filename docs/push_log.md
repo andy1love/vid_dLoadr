@@ -35,3 +35,20 @@
 
 ---
 
+## 2026-03-18 18:24:13 · ✓ SUCCESS
+
+**Branch:** main
+**Commit:** 4faeb8a → f94629d
+**Message:** Update README structure and remove legacy push skill
+
+**Summary:** Deleted the old `push/SKILL.md` (superseded by the current push skill) and updated `README.md` to match the actual project layout — renaming `workarea/` to `_workarea/`, documenting the new `_logs/` and `docs/push_log.md` paths, listing the `.command` helper scripts, and marking the SSH task as "In Progress" rather than "Blocked".
+
+**Files changed:**
+- `.claude/commands/push.md` (+84 / -0)
+- `.claude/skills/push/SKILL.md` (+0 / -34)
+- `README.md` (+19 / -10)
+- `_logs/push_20260318_182413.md` (+48 / -0)
+- `docs/push_log.md` (+37 / -0)
+
+---
+

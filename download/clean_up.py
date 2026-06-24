@@ -79,23 +79,20 @@ def get_note_content(note_title):
     """Retrieve content from an iCloud Note using AppleScript"""
     apple_script = f'''
     tell application "Notes"
-        set noteContent to ""
-        repeat with n in notes
-            if name of n is "{note_title}" then
-                set noteContent to body of n
-                exit repeat
-            end if
-        end repeat
-        return noteContent
+        set matchingNotes to (notes whose name is "{note_title}")
+        if (count of matchingNotes) > 0 then
+            return body of item 1 of matchingNotes
+        end if
+        return ""
     end tell
     '''
-    
+
     try:
         result = subprocess.run(
             ['osascript', '-e', apple_script],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=15
         )
         
         if result.returncode != 0:
@@ -125,21 +122,18 @@ def update_note_content(note_title, new_content):
         set tempFile to POSIX file "{temp_file}"
         set fileContent to read tempFile
         tell application "Notes"
-            activate
-            repeat with n in notes
-                if name of n is "{note_title}" then
-                    set body of n to fileContent
-                    exit repeat
-                end if
-            end repeat
+            set matchingNotes to (notes whose name is "{note_title}")
+            if (count of matchingNotes) > 0 then
+                set body of item 1 of matchingNotes to fileContent
+            end if
         end tell
         '''
-        
+
         result = subprocess.run(
             ['osascript', '-e', apple_script],
             capture_output=True,
             text=True,
-            timeout=30  # Increased timeout for large notes
+            timeout=15
         )
         
         # Clean up temp file
@@ -162,7 +156,7 @@ def update_note_content(note_title, new_content):
             os.unlink(temp_file)
         except:
             pass
-        print(f"⏱️  Note update timed out (30 seconds) - note may be very large")
+        print(f"⏱️  Note update timed out (15 seconds) - note may be very large")
         print(f"   The note update may have partially completed")
         return False
     except Exception as e:

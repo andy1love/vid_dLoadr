@@ -54,3 +54,6 @@ Thumbs.db
 *.temp
 *.bak
 
+# Local download staging (yt-dlp intermediates before move to iCloud)
+_tmp/
+
